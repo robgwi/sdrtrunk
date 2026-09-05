@@ -4,9 +4,9 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.6.2-beta-8
+## Current release: 0.6.2-beta-9
 
-- [Download Raspberry Pi ARM64 beta 8](https://github.com/robgwi/sdrtrunk/releases/tag/raspberry-pi-v0.6.2-beta-8)
+- [Download Raspberry Pi ARM64 beta 9](https://github.com/robgwi/sdrtrunk/releases/tag/raspberry-pi-v0.6.2-beta-9)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Upstream sdrtrunk wiki](https://github.com/DSheirer/sdrtrunk/wiki)
 
@@ -28,7 +28,7 @@ Signal strength is displayed as unavailable when a tuner does not expose calibra
 
 ### Web playlist management
 
-The beta-8 web channel and talkgroup editor can:
+The beta-9 web channel and talkgroup editor can:
 
 - Create and delete channels.
 - Edit channel name, system, site, alias-list assignment, frequency, protocol, and auto-start.
@@ -65,8 +65,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.6.2-beta-8.zip
-cd sdr-trunk-linux-aarch64-v0.6.2-beta-8
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.6.2-beta-9.zip
+cd sdr-trunk-linux-aarch64-v0.6.2-beta-9
 bin/sdr-trunk
 ```
 
@@ -84,6 +84,13 @@ bin/sdr-trunk
 Environment variables override saved GUI token settings. Do not commit real keys or tokens to this repository.
 
 ## Release history
+
+### 0.6.2-beta-9
+
+- Fixed `/api/v1/live-status` returning HTTP 500 after receiving non-finite audio samples.
+- Sanitized live audio-level calculations so the endpoint always emits valid JSON numbers.
+- Ignored blank alias names while preparing live scanner metadata.
+- Added a final compatibility repair for non-finite levels already present in a live-status snapshot.
 
 ### 0.6.2-beta-8
 

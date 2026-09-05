@@ -643,7 +643,8 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
                     Identifier to = segment.getIdentifierCollection().getToIdentifier();
                     Identifier from = segment.getIdentifierCollection().getFromIdentifier();
                     List<String> aliases = to != null && segment.getAliasList() != null ?
-                        segment.getAliasList().getAliases(to).stream().map(Alias::getName).toList() : List.of();
+                        segment.getAliasList().getAliases(to).stream().map(Alias::getName)
+                            .filter(name -> name != null && !name.isBlank()).toList() : List.of();
                     Identifier frequency = segment.getIdentifierCollection().getIdentifier(
                         IdentifierClass.CONFIGURATION, Form.CHANNEL_FREQUENCY, Role.ANY);
                     Map<String,Object> metadata = new LinkedHashMap<>();
@@ -691,7 +692,13 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
     private void liveStatus(HttpExchange exchange) throws IOException
     {
         if(!"GET".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
-        json(exchange, 200, mLatestAudioMetadata);
+        Map<String,Object> status = new LinkedHashMap<>(mLatestAudioMetadata);
+        Object level = status.get("audioLevelDbfs");
+        if(level instanceof Number number && !Double.isFinite(number.doubleValue()))
+        {
+            status.put("audioLevelDbfs", -100.0);
+        }
+        json(exchange, 200, status);
     }
 
     private static double audioLevelDbfs(AudioSegment segment)
@@ -700,10 +707,18 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         long count = 0;
         for(float[] buffer: segment.getAudioBuffers())
         {
-            for(float sample: buffer) { sum += sample * sample; count++; }
+            for(float sample: buffer)
+            {
+                if(Float.isFinite(sample))
+                {
+                    sum += sample * sample;
+                    count++;
+                }
+            }
         }
         if(count == 0 || sum == 0) { return -100.0; }
-        return Math.max(-100.0, 20.0 * Math.log10(Math.sqrt(sum / count)));
+        double level = 20.0 * Math.log10(Math.sqrt(sum / count));
+        return Double.isFinite(level) ? Math.max(-100.0, level) : -100.0;
     }
 
     public Listener<IDecodeEvent> getDecodeEventListener()
