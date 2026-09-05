@@ -18,8 +18,14 @@ import io.github.dsheirer.audio.convert.MP3Setting;
 import io.github.dsheirer.gui.SDRTrunk;
 import io.github.dsheirer.preference.UserPreferences;
 import io.github.dsheirer.sample.Listener;
+import io.github.dsheirer.module.decode.event.IDecodeEvent;
+import io.github.dsheirer.identifier.Role;
 import io.github.dsheirer.controller.channel.Channel;
 import io.github.dsheirer.controller.channel.ChannelProcessingManager;
+import io.github.dsheirer.controller.channel.ChannelEvent;
+import io.github.dsheirer.module.decode.DecoderFactory;
+import io.github.dsheirer.module.decode.DecoderType;
+import io.github.dsheirer.source.config.SourceConfigTuner;
 import io.github.dsheirer.monitor.ResourceMonitor;
 import io.github.dsheirer.playlist.PlaylistManager;
 import io.github.dsheirer.source.tuner.Tuner;
@@ -40,6 +46,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.prefs.Preferences;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -59,6 +66,7 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
     private volatile String mToken;
     private volatile byte[] mLatestAudio;
     private final AtomicLong mLatestAudioSequence = new AtomicLong();
+    private final ConcurrentLinkedDeque<Map<String,Object>> mActivity = new ConcurrentLinkedDeque<>();
     private HttpServer mServer;
 
     public SdrTrunkWebServer(PlaylistManager playlistManager, TunerManager tunerManager,
@@ -117,6 +125,7 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         mServer.createContext("/api/v1/recordings", authenticated(this::recordings));
         mServer.createContext("/api/v1/recording-audio", authenticated(this::recordingAudio));
         mServer.createContext("/api/v1/live-audio", authenticated(this::liveAudio));
+        mServer.createContext("/api/v1/activity", authenticated(this::activity));
         mServer.createContext("/", this::dashboard);
         mServer.start();
         mLog.info("sdrtrunk web interface listening at http://{}:{}", bind, port);
@@ -169,6 +178,7 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
 
     private void channels(HttpExchange exchange) throws IOException
     {
+        if("POST".equals(exchange.getRequestMethod())) { editChannel(exchange); return; }
         if(!"GET".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
         List<Map<String, Object>> result = new ArrayList<>();
         for(Channel channel: mPlaylistManager.getChannelModel().getChannels())
@@ -186,16 +196,86 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
     {
         Map<String, Object> value = new LinkedHashMap<>();
         value.put("name", channel.getName());
+        value.put("id", channel.getChannelID());
         value.put("system", channel.getSystem());
         value.put("site", channel.getSite());
         value.put("type", channel.getChannelType().name());
         value.put("processing", channel.isProcessing());
+        value.put("autoStart", channel.isAutoStart());
         value.put("aliasList", channel.getAliasListName());
         value.put("decoder", channel.getDecodeConfiguration() != null ?
             channel.getDecodeConfiguration().getDecoderType().name() : null);
         value.put("source", channel.getSourceConfiguration() != null ?
             channel.getSourceConfiguration().toString() : null);
+        if(channel.getSourceConfiguration() instanceof SourceConfigTuner tunerSource)
+        {
+            value.put("frequency", tunerSource.getFrequency());
+        }
         return value;
+    }
+
+    private void editChannel(HttpExchange exchange) throws IOException
+    {
+        JsonObject request = GSON.fromJson(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8),
+            JsonObject.class);
+        String action = stringValue(request, "action", "update");
+        int id = request.has("id") ? request.get("id").getAsInt() : -1;
+        Channel channel = mPlaylistManager.getChannelModel().getChannels().stream()
+            .filter(item -> item.getChannelID() == id).findFirst().orElse(null);
+
+        if("create".equalsIgnoreCase(action))
+        {
+            DecoderType decoder = decoderValue(request);
+            channel = new Channel(stringValue(request, "name", "New Channel"));
+            channel.setDecodeConfiguration(DecoderFactory.getDecodeConfiguration(decoder));
+            updateChannelFields(channel, request, false);
+            mPlaylistManager.getChannelModel().addChannel(channel);
+            json(exchange, 201, channelMap(channel));
+            return;
+        }
+
+        if(channel == null) { json(exchange, 404, Map.of("error", "channel not found")); return; }
+        if(channel.isProcessing()) { json(exchange, 409, Map.of("error", "stop channel before editing")); return; }
+        if("delete".equalsIgnoreCase(action))
+        {
+            mPlaylistManager.getChannelModel().removeChannel(channel);
+            json(exchange, 200, Map.of("deleted", id));
+            return;
+        }
+        updateChannelFields(channel, request, true);
+        mPlaylistManager.getChannelModel().receive(new ChannelEvent(channel,
+            ChannelEvent.Event.NOTIFICATION_CONFIGURATION_CHANGE));
+        json(exchange, 200, channelMap(channel));
+    }
+
+    private void updateChannelFields(Channel channel, JsonObject request, boolean allowDecoderChange)
+    {
+        if(request.has("name")) { channel.setName(request.get("name").getAsString()); }
+        if(request.has("system")) { channel.setSystem(request.get("system").getAsString()); }
+        if(request.has("site")) { channel.setSite(request.get("site").getAsString()); }
+        if(request.has("aliasList")) { channel.setAliasListName(request.get("aliasList").getAsString()); }
+        if(request.has("autoStart")) { channel.setAutoStart(request.get("autoStart").getAsBoolean()); }
+        if(request.has("frequency"))
+        {
+            SourceConfigTuner source = channel.getSourceConfiguration() instanceof SourceConfigTuner existing ?
+                existing : new SourceConfigTuner();
+            source.setFrequency(request.get("frequency").getAsLong());
+            channel.setSourceConfiguration(source);
+        }
+        if(allowDecoderChange && request.has("decoder"))
+        {
+            DecoderType decoder = decoderValue(request);
+            if(channel.getDecodeConfiguration() == null || channel.getDecodeConfiguration().getDecoderType() != decoder)
+            {
+                channel.setDecodeConfiguration(DecoderFactory.getDecodeConfiguration(decoder));
+            }
+        }
+    }
+
+    private DecoderType decoderValue(JsonObject request)
+    {
+        try { return DecoderType.valueOf(stringValue(request, "decoder", DecoderType.NBFM.name())); }
+        catch(Exception e) { return DecoderType.NBFM; }
     }
 
     private void tuners(HttpExchange exchange) throws IOException
@@ -418,6 +498,35 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         bytes(exchange, 200, "audio/mpeg", audio);
     }
 
+    public Listener<IDecodeEvent> getDecodeEventListener()
+    {
+        return event ->
+        {
+            Map<String,Object> item = new LinkedHashMap<>();
+            item.put("time", event.getTimeStart());
+            item.put("end", event.getTimeEnd());
+            item.put("duration", event.getDuration());
+            item.put("protocol", event.getProtocol() != null ? event.getProtocol().toString() : "Unknown");
+            item.put("type", event.getEventType() != null ? event.getEventType().toString() : "Activity");
+            item.put("talkgroup", event.getIdentifierCollection().getIdentifiers(Role.TO).stream()
+                .map(Object::toString).findFirst().orElse("Unknown"));
+            item.put("source", event.getIdentifierCollection().getIdentifiers(Role.FROM).stream()
+                .map(Object::toString).findFirst().orElse(""));
+            item.put("details", event.getDetails());
+            item.put("frequency", event.getChannelDescriptor() != null ?
+                event.getChannelDescriptor().getDownlinkFrequency() : 0);
+            item.put("signalAvailable", false);
+            mActivity.addFirst(item);
+            while(mActivity.size() > 100) { mActivity.pollLast(); }
+        };
+    }
+
+    private void activity(HttpExchange exchange) throws IOException
+    {
+        if(!"GET".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
+        json(exchange, 200, new ArrayList<>(mActivity));
+    }
+
     private void recordings(HttpExchange exchange) throws IOException
     {
         if(!"GET".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
@@ -501,15 +610,18 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
         <title>sdrtrunk web</title><style>
         :root{color-scheme:dark;--bg:#091017;--panel:#111d27;--line:#263847;--text:#e9f2f7;--muted:#8da5b4;--accent:#38d39f}
-        *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,sans-serif}header{padding:20px 28px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:15px;justify-content:space-between;flex-wrap:wrap}h1{margin:0;font-size:21px}main{padding:22px;display:grid;gap:18px}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.card,section{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}.value{font-size:24px;color:var(--accent);margin-top:7px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px;border-bottom:1px solid var(--line)}th,.muted{color:var(--muted)}button{background:var(--accent);border:0;border-radius:5px;padding:6px 10px;color:#05251b;font-weight:700}input{background:#0a141c;color:var(--text);border:1px solid var(--line);border-radius:5px;padding:7px}h2{font-size:16px;margin:0 0 12px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}@media(max-width:850px){.grid{grid-template-columns:1fr}}
+        *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,sans-serif}header{padding:20px 28px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:15px;justify-content:space-between;flex-wrap:wrap}h1{margin:0;font-size:21px}main{padding:22px;display:grid;gap:18px}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.card,section{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}.value{font-size:24px;color:var(--accent);margin-top:7px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px;border-bottom:1px solid var(--line)}th,.muted{color:var(--muted)}button{background:var(--accent);border:0;border-radius:5px;padding:6px 10px;color:#05251b;font-weight:700}input{background:#0a141c;color:var(--text);border:1px solid var(--line);border-radius:5px;padding:7px}h2{font-size:16px;margin:0 0 12px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.scanner{background:#06100d;border:1px solid #267c60}.scanner-line{display:flex;gap:24px;align-items:center;flex-wrap:wrap}.scan-state{font-size:24px;color:#67ffc5;letter-spacing:2px}.receiving{color:#ffca58}.meter{height:12px;width:160px;background:#18252c;border-radius:6px;overflow:hidden}.meter span{display:block;height:100%;background:linear-gradient(90deg,#37d79d,#ffd05a,#ff5e5e)}@media(max-width:850px){.grid{grid-template-columns:1fr}}
         </style></head><body><header><h1>sdrtrunk web console</h1><div><input id="token" type="password" placeholder="Web access token" autocomplete="current-password"> <button id="saveToken">Connect</button></div><span id="updated" class="muted">connecting</span></header><main>
+        <section class="scanner"><div class="scanner-line"><div><div class="muted">SCANNER</div><div id="scanState" class="scan-state">SCANNING</div></div><div><div class="muted">ACTIVE TALKGROUP</div><div class="value" id="activeTalkgroup">—</div></div><div><div class="muted">FREQUENCY</div><div class="value" id="activeFrequency">—</div></div><div><div class="muted">SOURCE RADIO</div><div class="value" id="activeSource">—</div></div><div><div class="muted">SIGNAL</div><div id="signalText">N/A</div><div class="meter"><span id="signalMeter" style="width:0"></span></div></div></div></section>
         <div class="cards"><div class="card">CPU<div class="value" id="cpu">—</div></div><div class="card">Memory<div class="value" id="memory">—</div></div><div class="card">Tuners<div class="value" id="tunerCount">—</div></div><div class="card">Active channels<div class="value" id="activeCount">—</div></div></div>
         <div class="grid"><section><h2>Tuners</h2><table><thead><tr><th>Name</th><th>Status</th><th>Frequency</th></tr></thead><tbody id="tuners"></tbody></table></section>
         <section><h2>Streaming destinations</h2><table><thead><tr><th>Name</th><th>Type</th><th>State</th><th>Queue</th></tr></thead><tbody id="streams"></tbody></table></section></div>
-        <section><h2>Channels</h2><table><thead><tr><th>System</th><th>Site</th><th>Name</th><th>Decoder</th><th>Status</th><th>Control</th></tr></thead><tbody id="channels"></tbody></table></section>
+        <section><h2>Playlist Channels <button onclick="openChannelEditor()">New Channel</button></h2><table><thead><tr><th>System</th><th>Site</th><th>Name</th><th>Decoder</th><th>Status</th><th>Control</th></tr></thead><tbody id="channels"></tbody></table></section>
         <div class="grid"><section><h2>Live traffic</h2><p class="muted">Plays each decoded transmission as soon as it completes.</p><button id="liveToggle">Start Live Listening</button> <span id="liveStatus" class="muted">Off</span><br><br><audio id="audioPlayer" controls></audio></section>
         <section><h2>Recorded audio</h2><table><thead><tr><th>File</th><th>Date</th><th>Size</th><th></th></tr></thead><tbody id="recordings"></tbody></table></section></div>
+        <section><h2>Recent scanner activity</h2><table><thead><tr><th>Time</th><th>Talkgroup</th><th>Source</th><th>Protocol</th><th>Frequency</th><th>Event</th></tr></thead><tbody id="activity"></tbody></table></section>
         <section><h2>Add Remote Call API destination</h2><form id="remoteForm" class="cards"><label>Name<br><input name="name" required></label><label>POST URL<br><input name="url" type="url" required></label><label>API key environment variable<br><input name="apiKeyEnvironmentVariable" value="SDRTRUNK_REMOTE_API_KEY"></label><label><input name="openAiEnabled" type="checkbox"> OpenAI Whisper</label><label><input name="translateToEnglish" type="checkbox"> Translate to English</label><div><button type="submit">Add destination</button> <span id="remoteResult" class="muted"></span></div></form></section>
+        <dialog id="channelDialog"><form id="channelForm"><input name="id" type="hidden"><h2>Edit Playlist Channel</h2><p><label>Name<br><input name="name" required></label></p><p><label>System<br><input name="system"></label> <label>Site<br><input name="site"></label></p><p><label>Frequency (Hz)<br><input name="frequency" type="number" min="0"></label> <label>Protocol<br><select name="decoder"><option>AM</option><option>DMR</option><option>LTR</option><option>LTR_NET</option><option>MPT1327</option><option>NBFM</option><option>NXDN</option><option>PASSPORT</option><option>P25_PHASE1</option><option>P25_PHASE2</option></select></label></p><p><label>Alias list<br><input name="aliasList"></label> <label><input name="autoStart" type="checkbox"> Auto-start</label></p><button type="submit">Save</button> <button type="button" onclick="channelDialog.close()">Cancel</button> <button id="deleteChannel" type="button">Delete</button><span id="channelResult" class="muted"></span></form></dialog>
         </main><script>
         const esc=s=>String(s??'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
         const mhz=n=>n?`${(n/1e6).toFixed(5)} MHz`:'—'; const mb=n=>n?`${(n/1048576).toFixed(1)} MB`:'—';
@@ -522,8 +634,13 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         async function pollLive(){if(!liveOn)return;try{const r=await fetch('/api/v1/live-audio?after='+liveSequence,{headers:apiHeaders(false)});if(r.status===200){liveSequence=Number(r.headers.get('X-Audio-Sequence'));await useAudio(r,'Playing live traffic')}}catch(e){liveStatus.textContent=e.message}finally{if(liveOn)setTimeout(pollLive,1000)}}
         async function playRecording(name){const r=await fetch('/api/v1/recording-audio?name='+encodeURIComponent(name),{headers:apiHeaders(false)});await useAudio(r,'Playing '+name)}
         async function control(name,action){await fetch('/api/v1/channel-control',{method:'POST',headers:apiHeaders(true),body:JSON.stringify({name,action})});refresh()}
+        let channelCache=[];
+        function openChannelEditor(id){const x=channelCache.find(c=>c.id===id)||{};channelForm.reset();for(const k of ['id','name','system','site','frequency','decoder','aliasList'])if(x[k]!=null)channelForm.elements[k].value=x[k];channelForm.elements.autoStart.checked=!!x.autoStart;deleteChannel.style.display=id==null?'none':'inline-block';channelResult.textContent='';channelDialog.showModal()}
+        channelForm.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(channelForm),body=Object.fromEntries(f);body.action=body.id?'update':'create';if(body.id)body.id=Number(body.id);body.frequency=Number(body.frequency||0);body.autoStart=f.has('autoStart');const r=await fetch('/api/v1/channels',{method:'POST',headers:apiHeaders(true),body:JSON.stringify(body)});channelResult.textContent=r.ok?'Saved':(await r.json()).error;if(r.ok){channelDialog.close();refresh()}});
+        deleteChannel.addEventListener('click',async()=>{if(!confirm('Delete this channel?'))return;const r=await fetch('/api/v1/channels',{method:'POST',headers:apiHeaders(true),body:JSON.stringify({action:'delete',id:Number(channelForm.elements.id.value)})});if(r.ok){channelDialog.close();refresh()}else channelResult.textContent=(await r.json()).error});
         remoteForm.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(remoteForm),body=Object.fromEntries(f);body.openAiEnabled=f.has('openAiEnabled');body.translateToEnglish=f.has('translateToEnglish');const r=await fetch('/api/v1/remote-destinations',{method:'POST',headers:apiHeaders(true),body:JSON.stringify(body)});const j=await r.json();remoteResult.textContent=r.ok?'Destination added':j.error;refresh()});
-        async function refresh(){try{const [s,t,c,b,r]=await Promise.all(['status','tuners','channels','broadcasters','recordings'].map(x=>fetch('/api/v1/'+x,{headers:apiHeaders(false)}).then(r=>{if(!r.ok)throw Error(r.status===401?'Access token required':'HTTP '+r.status);return r.json()})));cpu.textContent=(s.cpu*100).toFixed(1)+'%';memory.textContent=mb(s.memoryUsed);tunerCount.textContent=t.length;activeCount.textContent=c.filter(x=>x.processing).length;
-        tuners.innerHTML=t.map(x=>`<tr><td>${esc(x.name||x.id)}</td><td>${esc(x.status)}</td><td>${mhz(x.frequency)}</td></tr>`).join('');streams.innerHTML=b.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.type)}</td><td>${esc(x.state)}</td><td>${x.queue}</td></tr>`).join('');channels.innerHTML=c.map(x=>`<tr><td>${esc(x.system)}</td><td>${esc(x.site)}</td><td>${esc(x.name)}</td><td>${esc(x.decoder)}</td><td>${x.processing?'Active':'Stopped'}</td><td><button onclick="control(decodeURIComponent('${encodeURIComponent(x.name)}'),'${x.processing?'stop':'start'}')">${x.processing?'Stop':'Start'}</button></td></tr>`).join('');recordings.innerHTML=r.map(x=>`<tr><td>${esc(x.name)}</td><td>${new Date(x.modified).toLocaleString()}</td><td>${mb(x.size)}</td><td><button onclick="playRecording(decodeURIComponent('${encodeURIComponent(x.name)}'))">Play</button></td></tr>`).join('');updated.textContent='Updated '+new Date().toLocaleTimeString()}catch(e){updated.textContent=e.message}}refresh();setInterval(refresh,5000);
+        async function refresh(){try{const [s,t,c,b,r,a]=await Promise.all(['status','tuners','channels','broadcasters','recordings','activity'].map(x=>fetch('/api/v1/'+x,{headers:apiHeaders(false)}).then(r=>{if(!r.ok)throw Error(r.status===401?'Access token required':'HTTP '+r.status);return r.json()})));cpu.textContent=(s.cpu*100).toFixed(1)+'%';memory.textContent=mb(s.memoryUsed);tunerCount.textContent=t.length;activeCount.textContent=c.filter(x=>x.processing).length;
+        const current=a.length&&Date.now()-a[0].time<5000?a[0]:null;scanState.textContent=current?'RECEIVING':'SCANNING';scanState.className='scan-state'+(current?' receiving':'');activeTalkgroup.textContent=current?current.talkgroup:'—';activeFrequency.textContent=current?mhz(current.frequency):'—';activeSource.textContent=current&&current.source?current.source:'—';signalText.textContent=current&&current.signalAvailable?current.signal+' dB':'N/A';signalMeter.style.width=current&&current.signalAvailable?Math.max(0,Math.min(100,current.signal))+'%':'0';
+        channelCache=c.filter(x=>x.type==='STANDARD');tuners.innerHTML=t.map(x=>`<tr><td>${esc(x.name||x.id)}</td><td>${esc(x.status)}</td><td>${mhz(x.frequency)}</td></tr>`).join('');streams.innerHTML=b.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.type)}</td><td>${esc(x.state)}</td><td>${x.queue}</td></tr>`).join('');channels.innerHTML=c.map(x=>`<tr><td>${esc(x.system)}</td><td>${esc(x.site)}</td><td>${esc(x.name)}</td><td>${esc(x.decoder)}</td><td>${x.processing?'Active':'Stopped'}</td><td><button onclick="control(decodeURIComponent('${encodeURIComponent(x.name)}'),'${x.processing?'stop':'start'}')">${x.processing?'Stop':'Start'}</button> ${x.type==='STANDARD'?`<button onclick="openChannelEditor(${x.id})">Edit</button>`:''}</td></tr>`).join('');recordings.innerHTML=r.map(x=>`<tr><td>${esc(x.name)}</td><td>${new Date(x.modified).toLocaleString()}</td><td>${mb(x.size)}</td><td><button onclick="playRecording(decodeURIComponent('${encodeURIComponent(x.name)}'))">Play</button></td></tr>`).join('');activity.innerHTML=a.slice(0,30).map(x=>`<tr><td>${new Date(x.time).toLocaleTimeString()}</td><td>${esc(x.talkgroup)}</td><td>${esc(x.source)}</td><td>${esc(x.protocol)}</td><td>${mhz(x.frequency)}</td><td>${esc(x.type)}</td></tr>`).join('');updated.textContent='Updated '+new Date().toLocaleTimeString()}catch(e){updated.textContent=e.message}}refresh();setInterval(refresh,2000);
         </script></body></html>""";
 }

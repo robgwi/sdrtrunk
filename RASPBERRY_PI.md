@@ -31,6 +31,12 @@ server without restarting sdrtrunk.  The web dashboard can play completed live r
 the MP3/WAV files in the configured Audio Recordings directory for browser playback.  These audio endpoints require
 the same web access token as the rest of the remote API.
 
+The dashboard has a scanner-style activity display showing scanning/receiving state, active talkgroup, source radio,
+protocol, frequency, and recent decoded events.  Signal strength is shown as unavailable when the selected tuner does
+not expose calibrated RSSI through sdrtrunk's common tuner interface.  The web channel editor supports creating,
+editing, starting/stopping, and deleting playlist channels; advanced protocol-specific fields and RadioReference
+imports continue to use the desktop Playlist Editor in this beta.
+
 When launched from a terminal in the Raspberry Pi desktop or VNC session, the Java desktop interface opens and the
 web interface runs at the same time.  When no graphical display is available, start it explicitly in headless mode:
 
