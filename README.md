@@ -1,51 +1,122 @@
-![Gradle Build](https://github.com/dsheirer/sdrtrunk/actions/workflows/gradle.yml/badge.svg)
-![Nightly Release](https://github.com/dsheirer/sdrtrunk/actions/workflows/nightly.yml/badge.svg)
+# sdrtrunk Web and Raspberry Pi Fork
 
-# MacOS Tahoe 26.1 Users - Attention:
-Changes to USB support in Tahoe version 26.x cause sdrtrunk to fail to launch.  Do the following to install the latest libusb and create a symbolic link and then use the nightly build which includes an updated usb4java native library for Tahoe with ARM processor.  There may still be issue(s) with MacOS accessing your USB SDR tuners.
+This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://github.com/DSheirer/sdrtrunk). It adds Raspberry Pi ARM64 packaging, an embedded web console, remote call delivery, browser audio, and additional Playlist Editor workflows while retaining the Java desktop application.
 
+> This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
+
+## Current release: 0.6.2-beta-4
+
+- [Download Raspberry Pi ARM64 beta 4](https://github.com/robgwi/sdrtrunk/releases/tag/raspberry-pi-v0.6.2-beta-4)
+- [Raspberry Pi installation guide](RASPBERRY_PI.md)
+- [Upstream sdrtrunk wiki](https://github.com/DSheirer/sdrtrunk/wiki)
+
+The Raspberry Pi archive contains its own ARM64 Java and JavaFX runtime. A separate Java installation is not needed. It supports the Java desktop plus web console when launched from Raspberry Pi Desktop or VNC, and headless receiver plus web console when launched without a display or with `-Djava.awt.headless=true`.
+
+## Fork features
+
+### Scanner-style web console
+
+- Runs alongside both the desktop and headless application.
+- Shows scanning/receiving state, active talkgroup, source radio, protocol, frequency, and recent decoded activity.
+- Starts and stops configured channels remotely.
+- Plays completed live calls in the browser.
+- Lists and plays MP3/WAV recordings from the configured recording directory.
+- Shows tuner, channel, CPU, memory, and streaming-destination status.
+- Uses bearer-token authentication for non-local API requests.
+
+Signal strength is displayed as unavailable when a tuner does not expose calibrated RSSI through sdrtrunk's shared tuner interface. The dashboard does not fabricate a signal value.
+
+### Web playlist management
+
+The beta-4 web channel editor can:
+
+- Create and delete channels.
+- Edit channel name, system, site, alias-list assignment, frequency, protocol, and auto-start.
+- Start and stop channels.
+
+Advanced protocol-specific decoder fields, complete alias editing, all streaming forms, and RadioReference imports still use the Java desktop Playlist Editor. They are planned for later web-management phases.
+
+### Desktop Playlist Editor improvements
+
+- Change an existing channel protocol without deleting and recreating the channel.
+- Choose a protocol while cloning a channel.
+- Preserve general channel settings while resetting incompatible protocol-specific decoder options.
+- Manage the web access token and restart the embedded web server from **Playlist Editor > Web Interface**.
+
+### Remote call API and transcription
+
+- POST completed calls and metadata to a configurable API URL with an MP3 attachment.
+- Authenticate using an API key stored in an environment variable.
+- Transcribe locally or use OpenAI `whisper-1`.
+- Optionally translate supported audio to English through the hosted OpenAI workflow.
+- Existing Rdio Scanner uploads continue to use `<Rdio Scanner URL>/api/call-upload`.
+
+## Raspberry Pi quick start
+
+This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Confirm that `uname -m` prints `aarch64`.
+
+```bash
+sudo apt update
+sudo apt install libusb-1.0-0 unzip
+
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.6.2-beta-4.zip
+cd sdr-trunk-linux-aarch64-v0.6.2-beta-4
+bin/sdr-trunk
 ```
-brew install libusb --HEAD
-cd /opt
-sudo mkdir local
-cd local
-sudo mkdir lib
-```
-Next, find where brew installed the libusb library, for example: ```/opt/homebrew/Cellar/libusb/HEAD-9ceaa52/lib/libusb-1.0.0.dylib```    Note: the folder "HEAD-9ceaa52" is the version stamp for HEAD when you installed from it.
 
-Finally, create a symbolic link from the installed library to the place where usb4java is expecting to find libusb (/opt/local/lib/libusb-1.0.0.dylib)
+Open `http://<raspberry-pi-address>:8080/` from another computer. A desktop/VNC first launch asks you to create a web access token. A first headless launch generates a token, saves it, and writes it once to the startup log.
 
-```
-sudo ln -s /opt/homebrew/Cellar/libusb/HEAD-9ceaa52/lib/libusb-1.0.0.dylib /opt/local/lib/libusb-1.0.0.dylib
+To supply secrets through the launch environment instead:
+
+```bash
+export SDRTRUNK_WEB_TOKEN='replace-with-a-long-random-token'
+export SDRTRUNK_REMOTE_API_KEY='remote-destination-key'
+export OPENAI_API_KEY='OpenAI-key'
+bin/sdr-trunk
 ```
 
-# sdrtrunk
-A cross-platform java application for decoding, monitoring, recording and streaming trunked mobile and related radio protocols using Software Defined Radios (SDR).
+Environment variables override saved GUI token settings. Do not commit real keys or tokens to this repository.
 
-* [Help/Wiki Home Page](https://github.com/DSheirer/sdrtrunk/wiki)
-* [Getting Started](https://github.com/DSheirer/sdrtrunk/wiki/Getting-Started)
-* [User's Manual](https://github.com/DSheirer/sdrtrunk/wiki/User-Manual)
-* [Download](https://github.com/DSheirer/sdrtrunk/releases)
-* [Support](https://github.com/DSheirer/sdrtrunk/wiki/Support)
+## Release history
 
-![sdrtrunk Application](https://github.com/DSheirer/sdrtrunk/wiki/images/sdrtrunk.png)
-**Figure 1:** sdrtrunk Application Screenshot
+### 0.6.2-beta-4
 
-## Download the Latest Release
-All release versions of sdrtrunk are available from the [releases](https://github.com/DSheirer/sdrtrunk/releases) tab.
+- Promoted the accumulated Raspberry Pi and web work to a distinct beta-4 release.
+- Added the scanner-style receiving display and decoded activity history.
+- Added core browser channel creation, editing, protocol/frequency changes, auto-start, start/stop, and deletion.
+- Consolidated installation, security, feature, limitation, and release-history documentation.
 
-* **(alpha)** These versions are under development feature previews and likely to contain bugs and unexpected behavior.
-* **(beta)** These versions are currently being tested for bugs and functionality prior to final release.
-* **(final)** These versions have been tested and are the current release version.
+### 0.6.2-beta-3
 
-## Download Nightly Software Build
-The [nightly](https://github.com/DSheirer/sdrtrunk/releases/tag/nightly) release contains current builds of the software 
-for all supported operating systems.  This version of the software may contain bugs and may not run correctly.  However, 
-it let's you preview the most recent changes and fixes before the next software release.  **Always backup your 
-playlist(s) before you use the nightly builds.**  Note: the nightly release is updated each time code changes are 
-committed to the code base, so it's not really 'nightly' as much as it is 'current'.
+- Added a self-contained Raspberry Pi Linux ARM64 distribution.
+- Enabled desktop/VNC and headless operation from one package while keeping the web console available in both modes.
+- Added first-run web-token creation, GUI token editing, and web-server restart controls.
+- Added authenticated live call listening and recorded-audio playback.
+- Added direct protocol changes and protocol selection while cloning Playlist Editor channels.
 
-## Minimum System Requirements
-* **Operating System:** Windows (~~32 or~~ 64-bit), Linux (~~32 or~~ 64-bit) or Mac (64-bit, 12.x or higher)
-* **CPU:** 4-core
-* **RAM:** 8GB or more (preferred).  Depending on usage, 4GB may be sufficient.
+### Early beta work
+
+- Added the embedded web server and initial status dashboard.
+- Added the Remote Call API broadcast destination and completed MP3 upload.
+- Added local and hosted Whisper transcription/translation processing.
+- Added remote channel and streaming-destination status APIs.
+
+## Building from source
+
+```bash
+./gradlew test
+./gradlew runtimeZipRaspberryPi
+```
+
+The Raspberry Pi ZIP is written under `build/image/`.
+
+## Upstream project
+
+sdrtrunk is a cross-platform Java application for decoding, monitoring, recording, and streaming trunked and related radio systems using software-defined radios.
+
+- [Upstream getting started](https://github.com/DSheirer/sdrtrunk/wiki/Getting-Started)
+- [Upstream user manual](https://github.com/DSheirer/sdrtrunk/wiki/User-Manual)
+- [Upstream support](https://github.com/DSheirer/sdrtrunk/wiki/Support)
+- [Official upstream releases](https://github.com/DSheirer/sdrtrunk/releases)
+
+This fork remains licensed under the GNU General Public License version 3 or later, consistent with the upstream project. See [LICENSE](LICENSE) for the license text.
