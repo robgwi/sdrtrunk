@@ -250,8 +250,11 @@ public class SDRTrunk implements Listener<TunerEvent>
         {
             try
             {
-                mWebServer = new SdrTrunkWebServer(mPlaylistManager, mTunerManager, mResourceMonitor, webAccessToken);
+                mWebServer = new SdrTrunkWebServer(mPlaylistManager, mTunerManager, mResourceMonitor,
+                    mUserPreferences, webAccessToken);
                 mWebServer.start();
+                mPlaylistManager.getChannelProcessingManager().addAudioSegmentListener(
+                    mWebServer.getAudioSegmentListener());
             }
             catch(IOException e)
             {

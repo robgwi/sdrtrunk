@@ -10,6 +10,14 @@ import io.github.dsheirer.audio.broadcast.BroadcastConfiguration;
 import io.github.dsheirer.audio.broadcast.BroadcastModel;
 import io.github.dsheirer.audio.broadcast.ConfiguredBroadcast;
 import io.github.dsheirer.audio.broadcast.remote.RemoteApiConfiguration;
+import io.github.dsheirer.audio.AudioSegment;
+import io.github.dsheirer.audio.IAudioSegmentListener;
+import io.github.dsheirer.audio.convert.InputAudioFormat;
+import io.github.dsheirer.audio.convert.MP3AudioConverter;
+import io.github.dsheirer.audio.convert.MP3Setting;
+import io.github.dsheirer.gui.SDRTrunk;
+import io.github.dsheirer.preference.UserPreferences;
+import io.github.dsheirer.sample.Listener;
 import io.github.dsheirer.controller.channel.Channel;
 import io.github.dsheirer.controller.channel.ChannelProcessingManager;
 import io.github.dsheirer.monitor.ResourceMonitor;
@@ -21,40 +29,76 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.net.URLDecoder;
+import java.io.ByteArrayOutputStream;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.prefs.Preferences;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** Embedded, headless-safe HTTP API and initial browser dashboard. */
-public class SdrTrunkWebServer
+public class SdrTrunkWebServer implements IAudioSegmentListener
 {
     private static final Logger mLog = LoggerFactory.getLogger(SdrTrunkWebServer.class);
     private static final Gson GSON = new Gson();
     private static final long STARTED = System.currentTimeMillis();
+    private static final String TOKEN_KEY = "sdrtrunk.web.access.token";
+    private static volatile SdrTrunkWebServer ACTIVE;
     private final PlaylistManager mPlaylistManager;
     private final TunerManager mTunerManager;
     private final ResourceMonitor mResourceMonitor;
+    private final UserPreferences mUserPreferences;
     private volatile String mToken;
+    private volatile byte[] mLatestAudio;
+    private final AtomicLong mLatestAudioSequence = new AtomicLong();
     private HttpServer mServer;
 
     public SdrTrunkWebServer(PlaylistManager playlistManager, TunerManager tunerManager,
-                             ResourceMonitor resourceMonitor, String token)
+                             ResourceMonitor resourceMonitor, UserPreferences userPreferences, String token)
     {
         mPlaylistManager = playlistManager;
         mTunerManager = tunerManager;
         mResourceMonitor = resourceMonitor;
+        mUserPreferences = userPreferences;
         mToken = token;
+        ACTIVE = this;
     }
 
     /** Updates the bearer token without restarting the receiver or web server. */
     public void setToken(String token)
     {
         mToken = token;
+    }
+
+    public static String getSavedToken()
+    {
+        return Preferences.userNodeForPackage(SDRTrunk.class).get(TOKEN_KEY, "");
+    }
+
+    public static void saveToken(String token)
+    {
+        Preferences.userNodeForPackage(SDRTrunk.class).put(TOKEN_KEY, token);
+        if(ACTIVE != null) { ACTIVE.setToken(token); }
+    }
+
+    public static boolean isRunning()
+    {
+        return ACTIVE != null && ACTIVE.mServer != null;
+    }
+
+    public static synchronized void restartActive() throws IOException
+    {
+        if(ACTIVE == null) { throw new IOException("Web interface has not been initialized"); }
+        ACTIVE.stop();
+        ACTIVE.start();
     }
 
     public void start() throws IOException
@@ -70,6 +114,9 @@ public class SdrTrunkWebServer
         mServer.createContext("/api/v1/broadcasters", authenticated(this::broadcasters));
         mServer.createContext("/api/v1/remote-destinations", authenticated(this::remoteDestinations));
         mServer.createContext("/api/v1/channel-control", authenticated(this::channelControl));
+        mServer.createContext("/api/v1/recordings", authenticated(this::recordings));
+        mServer.createContext("/api/v1/recording-audio", authenticated(this::recordingAudio));
+        mServer.createContext("/api/v1/live-audio", authenticated(this::liveAudio));
         mServer.createContext("/", this::dashboard);
         mServer.start();
         mLog.info("sdrtrunk web interface listening at http://{}:{}", bind, port);
@@ -310,6 +357,131 @@ public class SdrTrunkWebServer
         exchange.close();
     }
 
+    @Override
+    public Listener<AudioSegment> getAudioSegmentListener()
+    {
+        return segment ->
+        {
+            Runnable encode = () -> encodeLiveAudio(segment);
+            if(segment.isComplete()) { Thread.startVirtualThread(encode); }
+            else
+            {
+                segment.completeProperty().addListener((observable, oldValue, complete) ->
+                {
+                    if(complete) { Thread.startVirtualThread(encode); }
+                });
+            }
+        };
+    }
+
+    private void encodeLiveAudio(AudioSegment segment)
+    {
+        try
+        {
+            if(segment.hasAudio() && !segment.isEncrypted())
+            {
+                MP3AudioConverter converter = new MP3AudioConverter(InputAudioFormat.SR_8000,
+                    MP3Setting.CBR_16, false);
+                ByteArrayOutputStream output = new ByteArrayOutputStream();
+                for(byte[] block: converter.convert(segment.getAudioBuffers())) { output.write(block); }
+                byte[] audio = output.toByteArray();
+                if(audio.length > 0)
+                {
+                    mLatestAudio = audio;
+                    mLatestAudioSequence.incrementAndGet();
+                }
+            }
+        }
+        catch(Exception e)
+        {
+            mLog.warn("Unable to prepare live web audio", e);
+        }
+        finally
+        {
+            segment.decrementConsumerCount();
+        }
+    }
+
+    private void liveAudio(HttpExchange exchange) throws IOException
+    {
+        if(!"GET".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
+        byte[] audio = mLatestAudio;
+        long requested = longQueryValue(exchange, "after", -1);
+        long sequence = mLatestAudioSequence.get();
+        if(audio == null || requested >= sequence)
+        {
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+            return;
+        }
+        exchange.getResponseHeaders().set("X-Audio-Sequence", Long.toString(sequence));
+        bytes(exchange, 200, "audio/mpeg", audio);
+    }
+
+    private void recordings(HttpExchange exchange) throws IOException
+    {
+        if(!"GET".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
+        Path root = mUserPreferences.getDirectoryPreference().getDirectoryRecording();
+        if(!Files.isDirectory(root)) { json(exchange, 200, List.of()); return; }
+        try(var paths = Files.list(root))
+        {
+            List<Map<String,Object>> result = paths.filter(Files::isRegularFile)
+                .filter(path -> isAudioFile(path.getFileName().toString()))
+                .sorted((a,b) -> Long.compare(lastModified(b), lastModified(a))).limit(200)
+                .map(path -> Map.<String,Object>of("name", path.getFileName().toString(),
+                    "size", fileSize(path), "modified", lastModified(path))).toList();
+            json(exchange, 200, result);
+        }
+    }
+
+    private void recordingAudio(HttpExchange exchange) throws IOException
+    {
+        if(!"GET".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
+        String name = queryValue(exchange, "name");
+        Path root = mUserPreferences.getDirectoryPreference().getDirectoryRecording().toAbsolutePath().normalize();
+        Path file = name == null ? root : root.resolve(name).normalize();
+        if(name == null || !file.startsWith(root) || !file.getParent().equals(root) || !Files.isRegularFile(file) ||
+            !isAudioFile(name))
+        {
+            json(exchange, 404, Map.of("error", "recording not found"));
+            return;
+        }
+        bytes(exchange, 200, name.toLowerCase().endsWith(".wav") ? "audio/wav" : "audio/mpeg",
+            Files.readAllBytes(file));
+    }
+
+    private static boolean isAudioFile(String name)
+    {
+        String lower = name.toLowerCase();
+        return lower.endsWith(".mp3") || lower.endsWith(".wav");
+    }
+
+    private static long lastModified(Path path) { try { return Files.getLastModifiedTime(path).toMillis(); } catch(Exception e) { return 0; } }
+    private static long fileSize(Path path) { try { return Files.size(path); } catch(Exception e) { return 0; } }
+    private static String queryValue(HttpExchange exchange, String key)
+    {
+        String query = exchange.getRequestURI().getRawQuery();
+        if(query == null) { return null; }
+        for(String part: query.split("&"))
+        {
+            String[] pair = part.split("=", 2);
+            if(URLDecoder.decode(pair[0], StandardCharsets.UTF_8).equals(key))
+            { return pair.length > 1 ? URLDecoder.decode(pair[1], StandardCharsets.UTF_8) : ""; }
+        }
+        return null;
+    }
+    private static long longQueryValue(HttpExchange exchange, String key, long fallback)
+    { try { return Long.parseLong(queryValue(exchange, key)); } catch(Exception e) { return fallback; } }
+
+    private static void bytes(HttpExchange exchange, int status, String contentType, byte[] value) throws IOException
+    {
+        exchange.getResponseHeaders().set("Content-Type", contentType);
+        exchange.getResponseHeaders().set("Cache-Control", "no-store");
+        exchange.sendResponseHeaders(status, value.length);
+        exchange.getResponseBody().write(value);
+        exchange.close();
+    }
+
     private static void methodNotAllowed(HttpExchange exchange) throws IOException
     {
         json(exchange, 405, Map.of("error", "method not allowed"));
@@ -335,6 +507,8 @@ public class SdrTrunkWebServer
         <div class="grid"><section><h2>Tuners</h2><table><thead><tr><th>Name</th><th>Status</th><th>Frequency</th></tr></thead><tbody id="tuners"></tbody></table></section>
         <section><h2>Streaming destinations</h2><table><thead><tr><th>Name</th><th>Type</th><th>State</th><th>Queue</th></tr></thead><tbody id="streams"></tbody></table></section></div>
         <section><h2>Channels</h2><table><thead><tr><th>System</th><th>Site</th><th>Name</th><th>Decoder</th><th>Status</th><th>Control</th></tr></thead><tbody id="channels"></tbody></table></section>
+        <div class="grid"><section><h2>Live traffic</h2><p class="muted">Plays each decoded transmission as soon as it completes.</p><button id="liveToggle">Start Live Listening</button> <span id="liveStatus" class="muted">Off</span><br><br><audio id="audioPlayer" controls></audio></section>
+        <section><h2>Recorded audio</h2><table><thead><tr><th>File</th><th>Date</th><th>Size</th><th></th></tr></thead><tbody id="recordings"></tbody></table></section></div>
         <section><h2>Add Remote Call API destination</h2><form id="remoteForm" class="cards"><label>Name<br><input name="name" required></label><label>POST URL<br><input name="url" type="url" required></label><label>API key environment variable<br><input name="apiKeyEnvironmentVariable" value="SDRTRUNK_REMOTE_API_KEY"></label><label><input name="openAiEnabled" type="checkbox"> OpenAI Whisper</label><label><input name="translateToEnglish" type="checkbox"> Translate to English</label><div><button type="submit">Add destination</button> <span id="remoteResult" class="muted"></span></div></form></section>
         </main><script>
         const esc=s=>String(s??'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
@@ -342,9 +516,14 @@ public class SdrTrunkWebServer
         let apiToken=localStorage.getItem('sdrtrunkWebToken')||'';token.value=apiToken;
         const apiHeaders=json=>Object.assign(json?{'Content-Type':'application/json'}:{},apiToken?{'Authorization':'Bearer '+apiToken}:{});
         saveToken.addEventListener('click',()=>{apiToken=token.value.trim();localStorage.setItem('sdrtrunkWebToken',apiToken);refresh()});
+        let liveOn=false,liveSequence=-1,audioUrl=null;
+        liveToggle.addEventListener('click',()=>{liveOn=!liveOn;liveToggle.textContent=liveOn?'Stop Live Listening':'Start Live Listening';liveStatus.textContent=liveOn?'Waiting for traffic':'Off';if(liveOn)pollLive()});
+        async function useAudio(r,label){if(!r.ok)return;if(audioUrl)URL.revokeObjectURL(audioUrl);audioUrl=URL.createObjectURL(await r.blob());audioPlayer.src=audioUrl;liveStatus.textContent=label;try{await audioPlayer.play()}catch(e){liveStatus.textContent=label+' — press Play'}}
+        async function pollLive(){if(!liveOn)return;try{const r=await fetch('/api/v1/live-audio?after='+liveSequence,{headers:apiHeaders(false)});if(r.status===200){liveSequence=Number(r.headers.get('X-Audio-Sequence'));await useAudio(r,'Playing live traffic')}}catch(e){liveStatus.textContent=e.message}finally{if(liveOn)setTimeout(pollLive,1000)}}
+        async function playRecording(name){const r=await fetch('/api/v1/recording-audio?name='+encodeURIComponent(name),{headers:apiHeaders(false)});await useAudio(r,'Playing '+name)}
         async function control(name,action){await fetch('/api/v1/channel-control',{method:'POST',headers:apiHeaders(true),body:JSON.stringify({name,action})});refresh()}
         remoteForm.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(remoteForm),body=Object.fromEntries(f);body.openAiEnabled=f.has('openAiEnabled');body.translateToEnglish=f.has('translateToEnglish');const r=await fetch('/api/v1/remote-destinations',{method:'POST',headers:apiHeaders(true),body:JSON.stringify(body)});const j=await r.json();remoteResult.textContent=r.ok?'Destination added':j.error;refresh()});
-        async function refresh(){try{const [s,t,c,b]=await Promise.all(['status','tuners','channels','broadcasters'].map(x=>fetch('/api/v1/'+x,{headers:apiHeaders(false)}).then(r=>{if(!r.ok)throw Error(r.status===401?'Access token required':'HTTP '+r.status);return r.json()})));cpu.textContent=(s.cpu*100).toFixed(1)+'%';memory.textContent=mb(s.memoryUsed);tunerCount.textContent=t.length;activeCount.textContent=c.filter(x=>x.processing).length;
-        tuners.innerHTML=t.map(x=>`<tr><td>${esc(x.name||x.id)}</td><td>${esc(x.status)}</td><td>${mhz(x.frequency)}</td></tr>`).join('');streams.innerHTML=b.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.type)}</td><td>${esc(x.state)}</td><td>${x.queue}</td></tr>`).join('');channels.innerHTML=c.map(x=>`<tr><td>${esc(x.system)}</td><td>${esc(x.site)}</td><td>${esc(x.name)}</td><td>${esc(x.decoder)}</td><td>${x.processing?'Active':'Stopped'}</td><td><button onclick="control(decodeURIComponent('${encodeURIComponent(x.name)}'),'${x.processing?'stop':'start'}')">${x.processing?'Stop':'Start'}</button></td></tr>`).join('');updated.textContent='Updated '+new Date().toLocaleTimeString()}catch(e){updated.textContent=e.message}}refresh();setInterval(refresh,2000);
+        async function refresh(){try{const [s,t,c,b,r]=await Promise.all(['status','tuners','channels','broadcasters','recordings'].map(x=>fetch('/api/v1/'+x,{headers:apiHeaders(false)}).then(r=>{if(!r.ok)throw Error(r.status===401?'Access token required':'HTTP '+r.status);return r.json()})));cpu.textContent=(s.cpu*100).toFixed(1)+'%';memory.textContent=mb(s.memoryUsed);tunerCount.textContent=t.length;activeCount.textContent=c.filter(x=>x.processing).length;
+        tuners.innerHTML=t.map(x=>`<tr><td>${esc(x.name||x.id)}</td><td>${esc(x.status)}</td><td>${mhz(x.frequency)}</td></tr>`).join('');streams.innerHTML=b.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.type)}</td><td>${esc(x.state)}</td><td>${x.queue}</td></tr>`).join('');channels.innerHTML=c.map(x=>`<tr><td>${esc(x.system)}</td><td>${esc(x.site)}</td><td>${esc(x.name)}</td><td>${esc(x.decoder)}</td><td>${x.processing?'Active':'Stopped'}</td><td><button onclick="control(decodeURIComponent('${encodeURIComponent(x.name)}'),'${x.processing?'stop':'start'}')">${x.processing?'Stop':'Start'}</button></td></tr>`).join('');recordings.innerHTML=r.map(x=>`<tr><td>${esc(x.name)}</td><td>${new Date(x.modified).toLocaleString()}</td><td>${mb(x.size)}</td><td><button onclick="playRecording(decodeURIComponent('${encodeURIComponent(x.name)}'))">Play</button></td></tr>`).join('');updated.textContent='Updated '+new Date().toLocaleTimeString()}catch(e){updated.textContent=e.message}}refresh();setInterval(refresh,5000);
         </script></body></html>""";
 }

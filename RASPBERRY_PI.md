@@ -26,6 +26,11 @@ it.  On the first headless launch, it creates and saves a random token and print
 The saved token can be replaced while the desktop application is running from **View > Web Access Token**.  An
 `SDRTRUNK_WEB_TOKEN` environment variable overrides the saved GUI setting.
 
+The Playlist Editor also contains a **Web Interface** tab where you can save a replacement token and restart the web
+server without restarting sdrtrunk.  The web dashboard can play completed live radio calls as they arrive and lists
+the MP3/WAV files in the configured Audio Recordings directory for browser playback.  These audio endpoints require
+the same web access token as the rest of the remote API.
+
 When launched from a terminal in the Raspberry Pi desktop or VNC session, the Java desktop interface opens and the
 web interface runs at the same time.  When no graphical display is available, start it explicitly in headless mode:
 
