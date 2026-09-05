@@ -4,9 +4,9 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.6.2-beta-5
+## Current release: 0.6.2-beta-6
 
-- [Download Raspberry Pi ARM64 beta 5](https://github.com/robgwi/sdrtrunk/releases/tag/raspberry-pi-v0.6.2-beta-5)
+- [Download Raspberry Pi ARM64 beta 6](https://github.com/robgwi/sdrtrunk/releases/tag/raspberry-pi-v0.6.2-beta-6)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Upstream sdrtrunk wiki](https://github.com/DSheirer/sdrtrunk/wiki)
 
@@ -28,7 +28,7 @@ Signal strength is displayed as unavailable when a tuner does not expose calibra
 
 ### Web playlist management
 
-The beta-5 web channel and talkgroup editor can:
+The beta-6 web channel and talkgroup editor can:
 
 - Create and delete channels.
 - Edit channel name, system, site, alias-list assignment, frequency, protocol, and auto-start.
@@ -38,6 +38,7 @@ The beta-5 web channel and talkgroup editor can:
 - Edit talkgroup name, category, protocol, numeric ID, recording flag, and playback priority.
 - Select the Remote Calls destinations that receive each talkgroup, using the same alias routing model as the desktop app.
 - Add, edit, enable, disable, and delete Remote Call API destinations, including authentication, retry, timeout, hosted Whisper, local Whisper, and translation settings.
+- Include the configured talkgroup alias in saved audio filenames for easier browsing and identification.
 
 Advanced protocol-specific decoder fields, non-talkgroup alias identifier types, and new online RadioReference system searches/imports still use the Java desktop Playlist Editor. Talkgroups from those imports can now be maintained or expanded in the web console.
 
@@ -64,8 +65,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.6.2-beta-5.zip
-cd sdr-trunk-linux-aarch64-v0.6.2-beta-5
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.6.2-beta-6.zip
+cd sdr-trunk-linux-aarch64-v0.6.2-beta-6
 bin/sdr-trunk
 ```
 
@@ -83,6 +84,12 @@ bin/sdr-trunk
 Environment variables override saved GUI token settings. Do not commit real keys or tokens to this repository.
 
 ## Release history
+
+### 0.6.2-beta-6
+
+- Added the resolved talkgroup alias to recorded MP3/WAV filenames.
+- Sanitized alias text using the existing recording filename safety and length handling.
+- Preserved the talkgroup ID, source radio, timestamp, duplicate suffix, and recording format in filenames.
 
 ### 0.6.2-beta-5
 
