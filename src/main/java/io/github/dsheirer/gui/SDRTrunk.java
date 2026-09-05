@@ -63,6 +63,7 @@ import io.github.dsheirer.spectrum.SpectralDisplayPanel;
 import io.github.dsheirer.util.ThreadPool;
 import io.github.dsheirer.util.TimeStamp;
 import io.github.dsheirer.vector.calibrate.CalibrationManager;
+import io.github.dsheirer.web.SdrTrunkWebServer;
 import java.awt.AWTException;
 import java.awt.Desktop;
 import java.awt.Dimension;
@@ -136,6 +137,8 @@ public class SDRTrunk implements Listener<TunerEvent>
     private TunerManager mTunerManager;
     private ApplicationLog mApplicationLog;
     private ResourceMonitor mResourceMonitor;
+    private SdrTrunkWebServer mWebServer;
+    private boolean mShutdown;
     private JFXPanel mResourceStatusPanel;
 
     private String mTitle;
@@ -162,6 +165,7 @@ public class SDRTrunk implements Listener<TunerEvent>
         }
 
         mResourceMonitor = new ResourceMonitor(mUserPreferences);
+        mResourceMonitor.start();
 
         ThreadPool.logSettings();
 
@@ -235,6 +239,27 @@ public class SDRTrunk implements Listener<TunerEvent>
         mTunerManager.getDiscoveredTunerModel().addListener(this);
 
         mPlaylistManager.init();
+
+        //The web interface is available alongside both the desktop GUI and headless operation.  It can be disabled
+        //explicitly for installations that do not want an HTTP listener.
+        boolean webEnabled = Boolean.parseBoolean(System.getProperty("sdrtrunk.web.enabled", "true"));
+        if(webEnabled)
+        {
+            try
+            {
+                mWebServer = new SdrTrunkWebServer(mPlaylistManager, mTunerManager, mResourceMonitor);
+                mWebServer.start();
+            }
+            catch(IOException e)
+            {
+                mLog.error("Unable to start sdrtrunk web interface", e);
+            }
+        }
+
+        if(headless)
+        {
+            Runtime.getRuntime().addShutdownHook(new Thread(this::processShutdown, "sdrtrunk-shutdown"));
+        }
 
         if(GraphicsEnvironment.isHeadless())
         {
@@ -400,7 +425,6 @@ public class SDRTrunk implements Listener<TunerEvent>
 
         mMainGui.add(mSplitPane, "cell 0 0,span,grow");
 
-        mResourceMonitor.start();
         mResourceStatusVisible = mPreferences.getBoolean(PREFERENCE_RESOURCE_STATUS_VISIBLE, true);
         if(mResourceStatusVisible)
         {
@@ -622,15 +646,36 @@ public class SDRTrunk implements Listener<TunerEvent>
      */
     private void processShutdown()
     {
+        if(mShutdown)
+        {
+            return;
+        }
+        mShutdown = true;
         mLog.info("Application shutdown started ...");
+        if(mWebServer != null)
+        {
+            mWebServer.stop();
+        }
         mDiagnosticMonitor.stop();
-        mUserPreferences.getSwingPreference().setLocation(WINDOW_FRAME_IDENTIFIER, mMainGui.getLocation());
-        mUserPreferences.getSwingPreference().setDimension(WINDOW_FRAME_IDENTIFIER, mMainGui.getSize());
-        mUserPreferences.getSwingPreference().setMaximized(WINDOW_FRAME_IDENTIFIER,
-            (mMainGui.getExtendedState() & JFrame.MAXIMIZED_BOTH) == JFrame.MAXIMIZED_BOTH);
-        mUserPreferences.getSwingPreference().setDimension(SPECTRAL_PANEL_IDENTIFIER, mSpectralPanel.getSize());
-        mUserPreferences.getSwingPreference().setDimension(CONTROLLER_PANEL_IDENTIFIER, mControllerPanel.getSize());
-        mJavaFxWindowManager.shutdown();
+        if(mMainGui != null)
+        {
+            mUserPreferences.getSwingPreference().setLocation(WINDOW_FRAME_IDENTIFIER, mMainGui.getLocation());
+            mUserPreferences.getSwingPreference().setDimension(WINDOW_FRAME_IDENTIFIER, mMainGui.getSize());
+            mUserPreferences.getSwingPreference().setMaximized(WINDOW_FRAME_IDENTIFIER,
+                (mMainGui.getExtendedState() & JFrame.MAXIMIZED_BOTH) == JFrame.MAXIMIZED_BOTH);
+        }
+        if(mSpectralPanel != null)
+        {
+            mUserPreferences.getSwingPreference().setDimension(SPECTRAL_PANEL_IDENTIFIER, mSpectralPanel.getSize());
+        }
+        if(mControllerPanel != null)
+        {
+            mUserPreferences.getSwingPreference().setDimension(CONTROLLER_PANEL_IDENTIFIER, mControllerPanel.getSize());
+        }
+        if(mJavaFxWindowManager != null)
+        {
+            mJavaFxWindowManager.shutdown();
+        }
         mLog.info("Stopping channels ...");
         mPlaylistManager.getChannelProcessingManager().shutdown();
         mAudioRecordingManager.stop();
