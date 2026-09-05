@@ -12,11 +12,11 @@ sudo apt install libusb-1.0-0
 
 ## Install and run
 
-Copy `sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-2.zip` to the Pi, then run:
+Copy `sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-3.zip` to the Pi, then run:
 
 ```bash
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-2.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-2
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-3.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-3
 export SDRTRUNK_WEB_TOKEN='replace-with-a-long-random-token'
 bin/sdr-trunk
 ```
@@ -32,9 +32,10 @@ order, and applies the selected hold time before the next call. It also lists
 the MP3/WAV files in the configured Audio Recordings directory for browser playback.  These audio endpoints require
 the same web access token as the rest of the remote API.
 
-The dashboard has a scanner-style activity display showing scanning/receiving state, active talkgroup, source radio,
-protocol, frequency, and recent decoded events.  Signal strength is shown as unavailable when the selected tuner does
-not expose calibrated RSSI through sdrtrunk's common tuner interface.  The web channel editor supports creating,
+The main page is a dedicated scanner-style display. When no call is active, its previous talkgroup, alias, frequency,
+source, signal, and level are cleared. System status, Playlist, RadioReference, Recordings, Transcripts, Remote Calls,
+and Settings open in modal windows from the top menu. Signal strength is shown as unavailable during an active call
+when the selected tuner does not expose calibrated RSSI through sdrtrunk's common tuner interface. The web channel editor supports creating,
 editing, starting/stopping, and deleting playlist channels. The top-menu RadioReference page can test Premium account
 credentials and preview/import talkgroups by RadioReference system ID. Desktop location browsing remains available.
 

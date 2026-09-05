@@ -4,9 +4,9 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.7.0-beta-2
+## Current release: 0.7.0-beta-3
 
-- [Download Raspberry Pi ARM64 0.7 beta 2](https://github.com/robgwi/sdrtrunk/releases/tag/raspberry-pi-v0.7.0-beta-2)
+- [Download Raspberry Pi ARM64 0.7 beta 3](https://github.com/robgwi/sdrtrunk/releases/tag/raspberry-pi-v0.7.0-beta-3)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Upstream sdrtrunk wiki](https://github.com/DSheirer/sdrtrunk/wiki)
 
@@ -17,7 +17,9 @@ The Raspberry Pi archive contains its own ARM64 Java and JavaFX runtime. A separ
 ### Scanner-style web console
 
 - Runs alongside both the desktop and headless application.
+- Keeps the main page focused on the live police-scanner display; management tools open from the top menu in modal windows.
 - Shows scanning/receiving state, talkgroup ID and configured alias/name, source radio, protocol, frequency, and recent decoded activity.
+- Clears the previous talkgroup, alias, frequency, source, signal, and level as soon as the receiver returns to scanning.
 - Starts and stops configured channels remotely.
 - Queues completed live calls in order and plays every call to completion before applying the configurable between-call hold time.
 - Shows the current call metadata, measured audio level, and number of waiting calls in the top scanner panel.
@@ -75,8 +77,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-2.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-2
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-3.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-3
 bin/sdr-trunk
 ```
 
@@ -94,6 +96,14 @@ bin/sdr-trunk
 Environment variables override saved GUI token settings. Do not commit real keys or tokens to this repository.
 
 ## Release history
+
+### 0.7.0-beta-3
+
+- Simplified the main web page to a dedicated police-scanner dashboard.
+- Moved System, Playlist, RadioReference, Recordings, Transcripts, Remote Calls, and Settings into responsive modal windows opened from the top menu.
+- Added a dedicated System modal for CPU, memory, tuners, active channels, streaming destinations, and recent activity.
+- Removed the completed-audio fallback from the real-time display so SCANNING never shows the last call's talkgroup, alias, frequency, source, signal, or audio level.
+- Kept queued MP3 playback status separate from the real-time receiver state.
 
 ### 0.7.0-beta-2
 
