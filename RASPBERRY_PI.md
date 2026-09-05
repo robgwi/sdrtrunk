@@ -1,4 +1,4 @@
-# Raspberry Pi web/headless build
+# Raspberry Pi desktop and web build
 
 This distribution targets a Raspberry Pi 4 or 5 running a 64-bit Raspberry Pi OS (`aarch64`).  Java 26 and JavaFX
 are included in the archive; Java does not need to be installed separately on the Pi.
@@ -19,6 +19,13 @@ unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.6.2-beta-1.zip
 cd sdr-trunk-linux-aarch64-v0.6.2-beta-1
 export SDRTRUNK_WEB_TOKEN='replace-with-a-long-random-token'
 bin/sdr-trunk
+```
+
+When launched from a terminal in the Raspberry Pi desktop or VNC session, the Java desktop interface opens and the
+web interface runs at the same time.  When no graphical display is available, start it explicitly in headless mode:
+
+```bash
+JAVA_OPTS='-Djava.awt.headless=true' bin/sdr-trunk
 ```
 
 Open `http://<raspberry-pi-address>:8080/` from another computer.  API clients must send the token as:

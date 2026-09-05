@@ -414,8 +414,7 @@ tasks.register('runtimeZipRaspberryPi', RuntimeZipTask) {rt ->
         }
     }
 
-    configure(rt, jvmArgsLinux + ['-Djava.awt.headless=true', '-Dsdrtrunk.web.enabled=true',
-                                  '-Dsdrtrunk.web.bind=0.0.0.0'])
+    configure(rt, jvmArgsLinux + ['-Dsdrtrunk.web.enabled=true', '-Dsdrtrunk.web.bind=0.0.0.0'])
     rt.extension.imageZip.set(file(layout.buildDirectory.dir('image').get()
         .file('sdr-trunk-raspberry-pi-aarch64.zip')))
 }
