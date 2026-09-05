@@ -47,6 +47,7 @@ import javafx.scene.Node;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.ChoiceDialog;
 import javafx.scene.control.Label;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuButton;
@@ -690,9 +691,35 @@ public class ChannelEditor extends SplitPane implements IFilterProcessor, IAlias
             mCloneButton.setMaxWidth(Double.MAX_VALUE);
             mCloneButton.setOnAction(event -> {
                 Channel selected = getChannelTableView().getSelectionModel().getSelectedItem();
-                Channel copy = selected.copyOf();
-                mPlaylistManager.getChannelModel().addChannel(copy);
-                getChannelTableView().getSelectionModel().select(copy);
+
+                if(selected != null && selected.getDecodeConfiguration() != null)
+                {
+                    DecoderType currentDecoder = selected.getDecodeConfiguration().getDecoderType();
+                    ChoiceDialog<DecoderType> dialog = new ChoiceDialog<>(currentDecoder,
+                        DecoderType.PRIMARY_DECODERS);
+                    dialog.setTitle("Clone Channel");
+                    dialog.setHeaderText("Select the protocol for the cloned channel");
+                    dialog.setContentText("Protocol:");
+                    dialog.initOwner(((Node)getCloneButton()).getScene().getWindow());
+
+                    Optional<DecoderType> result = dialog.showAndWait();
+
+                    if(result.isPresent())
+                    {
+                        Channel copy = selected.copyOf();
+                        DecoderType selectedDecoder = result.get();
+
+                        if(selectedDecoder != currentDecoder)
+                        {
+                            copy.setDecodeConfiguration(DecoderFactory.getDecodeConfiguration(selectedDecoder));
+                            copy.setAuxDecodeConfiguration(new AuxDecodeConfiguration());
+                        }
+
+                        mPlaylistManager.getChannelModel().addChannel(copy);
+                        getChannelTableView().getSelectionModel().select(copy);
+                        getChannelTableView().scrollTo(copy);
+                    }
+                }
             });
         }
 
