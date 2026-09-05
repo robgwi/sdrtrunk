@@ -17,6 +17,7 @@ import io.github.dsheirer.audio.convert.InputAudioFormat;
 import io.github.dsheirer.audio.convert.MP3AudioConverter;
 import io.github.dsheirer.audio.convert.MP3Setting;
 import io.github.dsheirer.gui.SDRTrunk;
+import io.github.dsheirer.gui.playlist.radioreference.RadioReferenceDecoder;
 import io.github.dsheirer.preference.UserPreferences;
 import io.github.dsheirer.sample.Listener;
 import io.github.dsheirer.module.decode.event.IDecodeEvent;
@@ -38,6 +39,8 @@ import io.github.dsheirer.module.decode.DecoderType;
 import io.github.dsheirer.source.config.SourceConfigTuner;
 import io.github.dsheirer.monitor.ResourceMonitor;
 import io.github.dsheirer.protocol.Protocol;
+import io.github.dsheirer.rrapi.type.TalkgroupCategory;
+import io.github.dsheirer.service.radioreference.RadioReference;
 import io.github.dsheirer.playlist.PlaylistManager;
 import io.github.dsheirer.source.tuner.Tuner;
 import io.github.dsheirer.source.tuner.manager.DiscoveredTuner;
@@ -75,6 +78,7 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
     private final TunerManager mTunerManager;
     private final ResourceMonitor mResourceMonitor;
     private final UserPreferences mUserPreferences;
+    private final WebTranscriptionService mTranscriptionService = new WebTranscriptionService();
     private volatile String mToken;
     private volatile byte[] mLatestAudio;
     private volatile Map<String,Object> mLatestAudioMetadata = Map.of();
@@ -141,6 +145,9 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         mServer.createContext("/api/v1/live-audio", authenticated(this::liveAudio));
         mServer.createContext("/api/v1/live-status", authenticated(this::liveStatus));
         mServer.createContext("/api/v1/activity", authenticated(this::activity));
+        mServer.createContext("/api/v1/transcripts", authenticated(this::transcripts));
+        mServer.createContext("/api/v1/whisper-settings", authenticated(this::whisperSettings));
+        mServer.createContext("/api/v1/radioreference", authenticated(this::radioReference));
         mServer.createContext("/", this::dashboard);
         mServer.start();
         mLog.info("sdrtrunk web interface listening at http://{}:{}", bind, port);
@@ -660,6 +667,7 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
                     mLatestAudio = audio;
                     metadata.put("sequence", mLatestAudioSequence.incrementAndGet());
                     mLatestAudioMetadata = metadata;
+                    mTranscriptionService.submit(audio, new LinkedHashMap<>(metadata));
                 }
             }
         }
@@ -754,6 +762,119 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         json(exchange, 200, new ArrayList<>(mActivity));
     }
 
+    private void transcripts(HttpExchange exchange) throws IOException
+    {
+        if(!"GET".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
+        json(exchange, 200, mTranscriptionService.transcripts());
+    }
+
+    private void whisperSettings(HttpExchange exchange) throws IOException
+    {
+        if("GET".equals(exchange.getRequestMethod()))
+        {
+            json(exchange, 200, mTranscriptionService.settings());
+            return;
+        }
+        if(!"POST".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
+        @SuppressWarnings("unchecked")
+        Map<String,Object> request = GSON.fromJson(new String(exchange.getRequestBody().readAllBytes(),
+            StandardCharsets.UTF_8), Map.class);
+        mTranscriptionService.update(request);
+        json(exchange, 200, mTranscriptionService.settings());
+    }
+
+    private void radioReference(HttpExchange exchange) throws IOException
+    {
+        RadioReference radioReference = mPlaylistManager.getRadioReference();
+        if("GET".equals(exchange.getRequestMethod()))
+        {
+            json(exchange, 200, Map.of("configured", mUserPreferences.getRadioReferencePreference().hasStoredCredentials(),
+                "userName", String.valueOf(mUserPreferences.getRadioReferencePreference().getUserName()),
+                "status", radioReference.getLoginStatus().name(), "premium", radioReference.premiumAccountProperty().get()));
+            return;
+        }
+        if(!"POST".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
+        JsonObject request = GSON.fromJson(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8),
+            JsonObject.class);
+        try
+        {
+            String action = requiredString(request, "action");
+            if("credentials".equals(action))
+            {
+                String username = requiredString(request, "username");
+                String password = requiredString(request, "password");
+                RadioReference.LoginStatus status = RadioReference.testConnectionWithExp(username, password);
+                if(status == RadioReference.LoginStatus.VALID_PREMIUM)
+                {
+                    mUserPreferences.getRadioReferencePreference().setStoreCredentials(true);
+                    mUserPreferences.getRadioReferencePreference().setUserName(username);
+                    mUserPreferences.getRadioReferencePreference().setPassword(password);
+                    radioReference.setAuthorizationInformation(new io.github.dsheirer.rrapi.type.AuthorizationInformation(
+                        RadioReference.SDRTRUNK_APP_KEY, username, password));
+                }
+                json(exchange, 200, Map.of("status", status.name()));
+                return;
+            }
+            int systemId = integerValue(request, "systemId", -1);
+            var service = radioReference.getService();
+            io.github.dsheirer.rrapi.type.SystemInformation information = service.getSystemInformation(systemId);
+            io.github.dsheirer.rrapi.type.System system = new io.github.dsheirer.rrapi.type.System();
+            system.setSystemId(systemId);
+            system.setName(information.getName());
+            system.setTypeId(information.getTypeId());
+            system.setFlavorId(information.getFlavorId());
+            system.setVoiceId(information.getVoiceId());
+            system.setCity(information.getCity());
+            system.setLastUpdated(information.getLastUpdated());
+            List<io.github.dsheirer.rrapi.type.Talkgroup> groups = service.getTalkgroups(systemId);
+            List<TalkgroupCategory> categories = service.getTalkgroupCategories(systemId);
+            Map<Integer,String> categoryNames = new LinkedHashMap<>();
+            for(TalkgroupCategory category: categories) { categoryNames.put(category.getTalkgroupCategoryId(), category.getName()); }
+            RadioReferenceDecoder decoder = new RadioReferenceDecoder(mUserPreferences, service.getTypesMap(),
+                service.getFlavorsMap(), service.getVoicesMap(), service.getTagsMap());
+            if("preview".equals(action))
+            {
+                List<Map<String,Object>> result = new ArrayList<>();
+                for(var group: groups)
+                {
+                    result.add(Map.of("id", group.getTalkgroupId(), "value", decoder.getTalkgroupValue(group, system),
+                        "name", String.valueOf(group.getAlphaTag()), "description", String.valueOf(group.getDescription()),
+                        "category", categoryNames.getOrDefault(group.getTalkgroupCategoryId(), ""),
+                        "protocol", decoder.getProtocol(system).name()));
+                }
+                json(exchange, 200, Map.of("system", system.getName(), "talkgroups", result));
+                return;
+            }
+            if("import".equals(action))
+            {
+                String aliasListName = requiredString(request, "aliasList");
+                AliasList aliasList = mPlaylistManager.getAliasModel().getAliasList(aliasListName);
+                List<Alias> created = new ArrayList<>();
+                for(var group: groups)
+                {
+                    Alias alias = decoder.createAlias(group, system, aliasListName,
+                        categoryNames.get(group.getTalkgroupCategoryId()));
+                    Talkgroup id = alias.getAliasIdentifiers().stream().filter(Talkgroup.class::isInstance)
+                        .map(Talkgroup.class::cast).findFirst().orElse(null);
+                    boolean exists = id != null && mPlaylistManager.getAliasModel().getAliases().stream()
+                        .filter(existing -> aliasListName.equals(existing.getAliasListName()))
+                        .flatMap(existing -> existing.getAliasIdentifiers().stream())
+                        .filter(Talkgroup.class::isInstance).map(Talkgroup.class::cast)
+                        .anyMatch(existing -> existing.getProtocol() == id.getProtocol() &&
+                            existing.getValue() == id.getValue());
+                    if(id != null && !exists) { created.add(alias); }
+                }
+                mPlaylistManager.getAliasModel().addAliases(created);
+                mPlaylistManager.schedulePlaylistSave();
+                json(exchange, 200, Map.of("system", system.getName(), "imported", created.size(),
+                    "available", groups.size(), "aliasList", aliasListName));
+                return;
+            }
+            json(exchange, 400, Map.of("error", "unsupported RadioReference action"));
+        }
+        catch(Exception e) { json(exchange, 400, Map.of("error", e.getMessage() != null ? e.getMessage() : "RadioReference request failed")); }
+    }
+
     private void recordings(HttpExchange exchange) throws IOException
     {
         if(!"GET".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
@@ -838,7 +959,8 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         <title>SDR-Trunk Web Console</title><style>
         :root{color-scheme:dark;--bg:#091017;--panel:#111d27;--line:#263847;--text:#e9f2f7;--muted:#8da5b4;--accent:#38d39f}
         *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,sans-serif}header{padding:20px 28px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:15px;justify-content:space-between;flex-wrap:wrap}h1{margin:0;font-size:21px}main{padding:22px;display:grid;gap:18px}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.card,section{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}.value{font-size:24px;color:var(--accent);margin-top:7px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px;border-bottom:1px solid var(--line)}th,.muted{color:var(--muted)}button{background:var(--accent);border:0;border-radius:5px;padding:6px 10px;color:#05251b;font-weight:700}input,select,textarea{background:#0a141c;color:var(--text);border:1px solid var(--line);border-radius:5px;padding:7px}textarea{width:100%}dialog{color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:10px;max-width:760px}h2{font-size:16px;margin:0 0 12px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.scanner{background:#06100d;border:1px solid #267c60}.scanner-line{display:flex;gap:24px;align-items:center;flex-wrap:wrap}.scan-state{font-size:24px;color:#67ffc5;letter-spacing:2px}.receiving{color:#ffca58}.meter{height:12px;width:160px;background:#18252c;border-radius:6px;overflow:hidden}.meter span{display:block;height:100%;background:linear-gradient(90deg,#37d79d,#ffd05a,#ff5e5e)}@media(max-width:850px){.grid{grid-template-columns:1fr}}
-        </style></head><body><header><h1>SDR-Trunk Web Console</h1><div><input id="token" type="password" placeholder="Web access token" autocomplete="current-password"> <button id="saveToken">Connect</button></div><span id="updated" class="muted">connecting</span></header><main>
+        html{scroll-behavior:smooth}nav{position:sticky;top:0;z-index:5;display:flex;gap:8px;padding:10px 22px;background:#0c171f;border-bottom:1px solid var(--line);overflow:auto}nav a{color:var(--text);text-decoration:none;padding:7px 10px;border-radius:6px;white-space:nowrap}nav a:hover{background:var(--accent);color:#05251b}section{scroll-margin-top:65px}#mapFrame{width:100%;height:330px;border:1px solid var(--line);border-radius:8px}
+        </style></head><body><header><h1>SDR-Trunk Web Console</h1><div><input id="token" type="password" placeholder="Web access token" autocomplete="current-password"> <button id="saveToken">Connect</button></div><span id="updated" class="muted">connecting</span></header><nav><a href="#dashboard">Dashboard</a><a href="#playlist">Playlist</a><a href="#radioreference">RadioReference</a><a href="#transcriptsSection">Transcripts</a><a href="#remoteCalls">Remote Calls</a><a href="#whisperSettings">Settings</a></nav><main>
         <section class="scanner"><h2>Live Traffic Scanner</h2><div class="scanner-line"><div><div class="muted">SCANNER</div><div id="scanState" class="scan-state">SCANNING</div></div><div><div class="muted">TALKGROUP ID</div><div class="value" id="activeTalkgroup">—</div></div><div><div class="muted">TALKGROUP ALIAS</div><div class="value" id="activeAlias">—</div></div><div><div class="muted">FREQUENCY</div><div class="value" id="activeFrequency">—</div></div><div><div class="muted">SOURCE RADIO</div><div class="value" id="activeSource">—</div></div><div><div class="muted">RF SIGNAL</div><div id="signalText">Unavailable</div></div><div><div class="muted">AUDIO LEVEL</div><div id="audioLevelText">—</div><div class="meter"><span id="signalMeter" style="width:0"></span></div></div></div><p><button id="liveToggle">Start Live Listening</button> <span id="liveStatus" class="muted">Off</span></p><audio id="audioPlayer" controls></audio></section>
         <div class="cards"><div class="card">CPU<div class="value" id="cpu">—</div></div><div class="card">Memory<div class="value" id="memory">—</div></div><div class="card">Tuners<div class="value" id="tunerCount">—</div></div><div class="card">Active channels<div class="value" id="activeCount">—</div></div></div>
         <div class="grid"><section><h2>Tuners</h2><table><thead><tr><th>Name</th><th>Status</th><th>Frequency</th></tr></thead><tbody id="tuners"></tbody></table></section>
@@ -847,11 +969,15 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         <section><h2>Talkgroups &amp; Aliases <button onclick="openTalkgroupEditor()">Add Talkgroup</button></h2><p class="muted">Add or edit talkgroups imported from RadioReference. Assigning a Remote Call destination controls which calls are sent there.</p><table><thead><tr><th>Alias List</th><th>Talkgroup</th><th>Name</th><th>Group</th><th>Protocol</th><th>Record</th><th>Remote Calls</th><th></th></tr></thead><tbody id="talkgroups"></tbody></table></section>
         <section><h2>Recorded audio</h2><table><thead><tr><th>File</th><th>Date</th><th>Size</th><th></th></tr></thead><tbody id="recordings"></tbody></table></section>
         <section><h2>Recent scanner activity</h2><table><thead><tr><th>Time</th><th>Talkgroup</th><th>Alias</th><th>Source</th><th>Protocol</th><th>Frequency</th><th>Event</th></tr></thead><tbody id="activity"></tbody></table></section>
-        <section><h2>Remote Calls <button onclick="openRemoteEditor()">Add Destination</button></h2><table><thead><tr><th>Name</th><th>POST URL</th><th>Status</th><th>Transcription</th><th></th></tr></thead><tbody id="remoteDestinations"></tbody></table></section>
+        <section id="radioreference"><h2>RadioReference Talkgroup Import</h2><p class="muted">Uses a premium RadioReference account. Preview a trunked system by its RadioReference System ID, then import new talkgroups into an alias list without duplicating existing IDs.</p><form id="rrCredentialForm" class="cards"><label>Username<br><input name="username" autocomplete="username"></label><label>Password<br><input name="password" type="password" autocomplete="current-password"></label><div><button type="submit">Save &amp; Test Account</button></div></form><p id="radioReferenceStatus" class="muted">Checking account…</p><form id="rrImportForm" class="cards"><label>System ID<br><input name="systemId" type="number" min="1" required></label><label>Import to alias list<br><input name="aliasList" required></label><div><button type="button" id="rrPreview">Preview</button> <button type="submit">Import Talkgroups</button></div></form><p id="rrResult" class="muted"></p><table><thead><tr><th>ID</th><th>Name</th><th>Category</th><th>Description</th></tr></thead><tbody id="rrTalkgroups"></tbody></table></section>
+        <section id="transcriptsSection"><h2>Scanner Transcripts</h2><p class="muted">Completed calls are transcribed in the background. Pin an address or transcript to preview it with OpenStreetMap.</p><table><thead><tr><th>Time</th><th>Talkgroup</th><th>Alias</th><th>Transcript</th><th></th></tr></thead><tbody id="transcripts"></tbody></table><iframe id="mapFrame" title="Transcript location map"></iframe></section>
+        <section id="remoteCalls"><h2>Remote Calls <button onclick="openRemoteEditor()">Add Destination</button></h2><table><thead><tr><th>Name</th><th>POST URL</th><th>Status</th><th>Transcription</th><th></th></tr></thead><tbody id="remoteDestinations"></tbody></table></section>
+        <section id="whisperSettings"><h2>Whisper Settings</h2><form id="whisperForm"><div class="cards"><label>Whisper executable<br><input name="executable" placeholder="whisper"></label><label>Model<br><input name="model" placeholder="base.en"></label><label>Language<br><input name="language" value="English"></label><label>Task<br><select name="task"><option>transcribe</option><option>translate</option></select></label><label>Timeout seconds<br><input name="timeoutSeconds" type="number" min="10" value="180"></label><label>Map city / region<br><input name="city"></label></div><p><label><input name="enabled" type="checkbox"> Enable background transcription</label> <label><input name="normalize" type="checkbox"> Normalize scanner numbers</label> <label><input name="redact" type="checkbox"> Redact PII</label></p><label>Scanner vocabulary prompt<br><textarea name="prompt" rows="5"></textarea></label><p><button type="submit">Save Whisper Settings</button> <span id="whisperResult" class="muted"></span></p><p class="muted">Install source: <a href="https://github.com/robgwi/whisper" target="_blank">robgwi/whisper</a>. Python, PyTorch, ffmpeg, the Whisper package, and model weights are installed separately from the Java application.</p></form></section>
         <dialog id="channelDialog"><form id="channelForm"><input name="id" type="hidden"><h2>Edit Playlist Channel</h2><p><label>Name<br><input name="name" required></label></p><p><label>System<br><input name="system"></label> <label>Site<br><input name="site"></label></p><p><label>Frequency (Hz)<br><input name="frequency" type="number" min="0"></label> <label>Protocol<br><select name="decoder"><option>AM</option><option>DMR</option><option>LTR</option><option>LTR_NET</option><option>MPT1327</option><option>NBFM</option><option>NXDN</option><option>PASSPORT</option><option>P25_PHASE1</option><option>P25_PHASE2</option></select></label></p><p><label>Alias list<br><input name="aliasList"></label> <label><input name="autoStart" type="checkbox"> Auto-start</label></p><button type="submit">Save</button> <button type="button" onclick="channelDialog.close()">Cancel</button> <button id="deleteChannel" type="button">Delete</button><span id="channelResult" class="muted"></span></form></dialog>
         <dialog id="talkgroupDialog"><form id="talkgroupForm"><input name="id" type="hidden"><h2>Talkgroup / Alias</h2><div class="cards"><label>Alias list<br><input name="aliasList" required></label><label>Talkgroup ID<br><input name="talkgroup" type="number" min="0" required></label><label>Talkgroup name / alias<br><input name="name" required></label><label>Category / group<br><input name="group"></label><label>Protocol<br><select name="protocol"><option value="APCO25">P25</option><option>DMR</option><option>NXDN</option><option>LTR</option><option>LTR_NET</option><option>MPT1327</option><option>PASSPORT</option><option>NBFM</option><option>AM</option></select></label><label>Playback priority<br><input name="priority" type="number" min="1" max="100" value="100"></label></div><p><label><input name="record" type="checkbox"> Record calls</label></p><fieldset><legend>Send calls to Remote Calls destinations</legend><div id="talkgroupRemoteCalls" class="cards"></div></fieldset><p><button type="submit">Save</button> <button type="button" onclick="talkgroupDialog.close()">Cancel</button> <button id="deleteTalkgroup" type="button">Delete</button> <span id="talkgroupResult" class="muted"></span></p></form></dialog>
         <dialog id="remoteDialog"><form id="remoteForm"><input name="originalName" type="hidden"><h2>Remote Call API Destination</h2><div class="cards"><label>Name<br><input name="name" required></label><label>POST URL<br><input name="url" type="url" required></label><label>API key environment variable<br><input name="apiKeyEnvironmentVariable" value="SDRTRUNK_REMOTE_API_KEY"></label><label>Authentication header<br><input name="authenticationHeader" value="Authorization"></label><label>Authentication prefix<br><input name="authenticationPrefix" value="Bearer "></label><label>Retries<br><input name="maximumRetries" type="number" min="0" value="5"></label><label>Concurrent uploads<br><input name="maximumConcurrentUploads" type="number" min="1" value="2"></label><label>Timeout seconds<br><input name="requestTimeoutSeconds" type="number" min="1" value="60"></label><label>Maximum call age seconds<br><input name="maximumRecordingAgeSeconds" type="number" min="1" value="600"></label><label>OpenAI key environment variable<br><input name="openAiKeyEnvironmentVariable" value="OPENAI_API_KEY"></label><label>Local Whisper executable<br><input name="localWhisperExecutable"></label><label>Local Whisper model<br><input name="localWhisperModel"></label></div><p><label><input name="enabled" type="checkbox" checked> Enabled</label> <label><input name="openAiEnabled" type="checkbox"> OpenAI Whisper</label> <label><input name="translateToEnglish" type="checkbox"> Translate to English</label></p><button type="submit">Save</button> <button type="button" onclick="remoteDialog.close()">Cancel</button> <button id="deleteRemote" type="button">Delete</button> <span id="remoteResult" class="muted"></span></form></dialog>
         </main><script>
+        document.querySelector('.scanner').id='dashboard';[...document.querySelectorAll('section')].find(s=>s.querySelector('h2')?.textContent.startsWith('Playlist Channels')).id='playlist';
         const esc=s=>String(s??'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
         const mhz=n=>n?`${(n/1e6).toFixed(5)} MHz`:'—'; const mb=n=>n?`${(n/1048576).toFixed(1)} MB`:'—';
         let apiToken=localStorage.getItem('sdrtrunkWebToken')||'';token.value=apiToken;
@@ -875,8 +1001,18 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         function openRemoteEditor(name){const x=remoteCache.find(d=>d.name===name)||{enabled:true,maximumRetries:5,maximumConcurrentUploads:2,requestTimeoutSeconds:60,maximumRecordingAgeSeconds:600,apiKeyEnvironmentVariable:'SDRTRUNK_REMOTE_API_KEY',authenticationHeader:'Authorization',authenticationPrefix:'Bearer ',openAiKeyEnvironmentVariable:'OPENAI_API_KEY'};remoteForm.reset();for(const k of ['originalName','name','url','apiKeyEnvironmentVariable','authenticationHeader','authenticationPrefix','maximumRetries','maximumConcurrentUploads','requestTimeoutSeconds','maximumRecordingAgeSeconds','openAiKeyEnvironmentVariable','localWhisperExecutable','localWhisperModel'])remoteForm.elements[k].value=k==='originalName'?(name||''):(x[k]??'');for(const k of ['enabled','openAiEnabled','translateToEnglish'])remoteForm.elements[k].checked=!!x[k];deleteRemote.style.display=name?'inline-block':'none';remoteResult.textContent='';remoteDialog.showModal()}
         remoteForm.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(remoteForm),body=Object.fromEntries(f);body.action=body.originalName?'update':'create';for(const k of ['enabled','openAiEnabled','translateToEnglish'])body[k]=f.has(k);for(const k of ['maximumRetries','maximumConcurrentUploads','requestTimeoutSeconds','maximumRecordingAgeSeconds'])body[k]=Number(body[k]);const r=await fetch('/api/v1/remote-destinations',{method:'POST',headers:apiHeaders(true),body:JSON.stringify(body)});const j=await r.json();remoteResult.textContent=r.ok?'Saved':j.error;if(r.ok){remoteDialog.close();refresh()}});
         deleteRemote.addEventListener('click',async()=>{if(!confirm('Delete this Remote Calls destination?'))return;const name=remoteForm.elements.originalName.value,r=await fetch('/api/v1/remote-destinations',{method:'POST',headers:apiHeaders(true),body:JSON.stringify({action:'delete',originalName:name})});if(r.ok){remoteDialog.close();refresh()}else remoteResult.textContent=(await r.json()).error});
+        let whisperLoaded=false,transcriptCity='';
+        async function rrRequest(body){const r=await fetch('/api/v1/radioreference',{method:'POST',headers:apiHeaders(true),body:JSON.stringify(body)}),j=await r.json();if(!r.ok)throw Error(j.error||r.status);return j}
+        rrCredentialForm.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(rrCredentialForm);try{const j=await rrRequest({action:'credentials',username:f.get('username'),password:f.get('password')});radioReferenceStatus.textContent='Account: '+j.status}catch(e){radioReferenceStatus.textContent=e.message}});
+        rrPreview.addEventListener('click',async()=>{const f=new FormData(rrImportForm);rrResult.textContent='Loading system…';try{const j=await rrRequest({action:'preview',systemId:Number(f.get('systemId'))});rrResult.textContent=j.system+' — '+j.talkgroups.length+' talkgroups';rrTalkgroups.innerHTML=j.talkgroups.map(x=>`<tr><td>${x.value}</td><td>${esc(x.name)}</td><td>${esc(x.category)}</td><td>${esc(x.description)}</td></tr>`).join('')}catch(e){rrResult.textContent=e.message}});
+        rrImportForm.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(rrImportForm);if(!confirm('Import new talkgroups into '+f.get('aliasList')+'?'))return;rrResult.textContent='Importing…';try{const j=await rrRequest({action:'import',systemId:Number(f.get('systemId')),aliasList:f.get('aliasList')});rrResult.textContent=`Imported ${j.imported} of ${j.available} talkgroups into ${j.aliasList}`;refresh()}catch(e){rrResult.textContent=e.message}});
+        fetch('/api/v1/radioreference',{headers:apiHeaders(false)}).then(r=>r.json()).then(j=>radioReferenceStatus.textContent=`Account: ${j.userName||'not configured'} — ${j.status}${j.premium?' (Premium)':''}`).catch(e=>radioReferenceStatus.textContent=e.message);
+        async function refreshTranscripts(){try{const items=await fetch('/api/v1/transcripts',{headers:apiHeaders(false)}).then(r=>r.json()),settings=await fetch('/api/v1/whisper-settings',{headers:apiHeaders(false)}).then(r=>r.json());transcriptCity=settings.city||'';if(!whisperLoaded){for(const k of ['executable','model','language','task','timeoutSeconds','city','prompt'])whisperForm.elements[k].value=settings[k]??'';for(const k of ['enabled','normalize','redact'])whisperForm.elements[k].checked=!!settings[k];whisperLoaded=true}transcripts.innerHTML=items.map(x=>`<tr><td>${new Date(x.time).toLocaleTimeString()}</td><td>${esc(x.talkgroup)}</td><td>${esc(x.alias)}</td><td>${esc(x.text)}</td><td><button onclick="pinLocation(decodeURIComponent('${encodeURIComponent(x.text||'')}'))">Pin</button></td></tr>`).join('')}catch(e){whisperResult.textContent=e.message}}
+        whisperForm.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(whisperForm),body=Object.fromEntries(f);for(const k of ['enabled','normalize','redact'])body[k]=f.has(k);body.timeoutSeconds=Number(body.timeoutSeconds||180);const r=await fetch('/api/v1/whisper-settings',{method:'POST',headers:apiHeaders(true),body:JSON.stringify(body)}),j=await r.json();whisperResult.textContent=r.ok?'Settings saved':j.error;whisperLoaded=false;refreshTranscripts()});
+        async function pinLocation(text){const query=transcriptCity?text+', '+transcriptCity:text;try{const r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(query)),data=await r.json();if(!data.length){alert('No location found. Set a city or use an address.');return}const lat=Number(data[0].lat),lon=Number(data[0].lon);mapFrame.src='https://www.openstreetmap.org/export/embed.html?marker='+lat+'%2C'+lon+'&bbox='+(lon-.01)+'%2C'+(lat-.01)+'%2C'+(lon+.01)+'%2C'+(lat+.01)+'&layer=mapnik'}catch(e){alert('Geocoding failed: '+e.message)}}
         async function refresh(){const errors=[];const get=async(name,fallback)=>{try{const response=await fetch('/api/v1/'+name,{headers:apiHeaders(false)});const body=await response.json();if(!response.ok)throw Error(response.status===401?'Access token required':(body.error||'HTTP '+response.status));return body}catch(e){errors.push(name+': '+e.message);return fallback}};try{const [s,t,c,b,r,a,l,tg,rd]=await Promise.all([get('status',{}),get('tuners',[]),get('channels',[]),get('broadcasters',[]),get('recordings',[]),get('activity',[]),get('live-status',{}),get('talkgroups',[]),get('remote-destinations',[])]);cpu.textContent=s.cpuAvailable?(s.cpu<.005?'<1%':(s.cpu*100).toFixed(1)+'%'):'Unavailable';memory.textContent=s.memoryUsed!=null?mb(s.memoryUsed)+' / '+mb(s.memoryMaximum):'Unavailable';tunerCount.textContent=t.length;activeCount.textContent=c.filter(x=>x.processing).length;
         const current=a.length&&Date.now()-a[0].time<5000?a[0]:null;scanState.textContent=current?'RECEIVING':'SCANNING';scanState.className='scan-state'+(current?' receiving':'');if(current){activeTalkgroup.textContent=current.talkgroup;activeAlias.textContent=current.alias||'Unidentified';activeFrequency.textContent=mhz(current.frequency);activeSource.textContent=current.source||'—'}else if(l&&l.sequence){showLive(l)}
         channelCache=c.filter(x=>x.type==='STANDARD');talkgroupCache=tg;remoteCache=rd;tuners.innerHTML=t.map(x=>`<tr><td>${esc(x.name||x.id)}</td><td>${esc(x.status)}</td><td>${mhz(x.frequency)}</td></tr>`).join('');streams.innerHTML=b.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.type)}</td><td>${esc(x.state)}</td><td>${x.queue}</td></tr>`).join('');channels.innerHTML=c.map(x=>`<tr><td>${esc(x.system)}</td><td>${esc(x.site)}</td><td>${esc(x.name)}</td><td>${esc(x.decoder)}</td><td>${x.processing?'Active':'Stopped'}</td><td><button onclick="control(decodeURIComponent('${encodeURIComponent(x.name)}'),'${x.processing?'stop':'start'}')">${x.processing?'Stop':'Start'}</button> ${x.type==='STANDARD'?`<button onclick="openChannelEditor(${x.id})">Edit</button> <button onclick="openTalkgroupEditor(null,decodeURIComponent('${encodeURIComponent(x.aliasList||'')}'))">Add TG</button>`:''}</td></tr>`).join('');talkgroups.innerHTML=tg.map(x=>`<tr><td>${esc(x.aliasList)}</td><td>${x.talkgroup}</td><td>${esc(x.name)}</td><td>${esc(x.group)}</td><td>${esc(x.protocol)}</td><td>${x.record?'Yes':'No'}</td><td>${esc((x.remoteCalls||[]).join(', '))}</td><td><button onclick="openTalkgroupEditor(${x.id})">Edit</button></td></tr>`).join('');remoteDestinations.innerHTML=rd.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.url)}</td><td>${x.enabled?'Enabled':'Disabled'}</td><td>${x.openAiEnabled?(x.translateToEnglish?'Translate':'Transcribe'):(x.localWhisperExecutable?'Local Whisper':'Off')}</td><td><button onclick="openRemoteEditor(decodeURIComponent('${encodeURIComponent(x.name)}'))">Edit</button></td></tr>`).join('');recordings.innerHTML=r.map(x=>`<tr><td>${esc(x.name)}</td><td>${new Date(x.modified).toLocaleString()}</td><td>${mb(x.size)}</td><td><button onclick="playRecording(decodeURIComponent('${encodeURIComponent(x.name)}'))">Play</button></td></tr>`).join('');activity.innerHTML=a.slice(0,30).map(x=>`<tr><td>${new Date(x.time).toLocaleTimeString()}</td><td>${esc(x.talkgroup)}</td><td>${esc(x.alias||'Unidentified')}</td><td>${esc(x.source)}</td><td>${esc(x.protocol)}</td><td>${mhz(x.frequency)}</td><td>${esc(x.type)}</td></tr>`).join('');updated.textContent=errors.length?errors.join(' | '):'Updated '+new Date().toLocaleTimeString()}catch(e){updated.textContent=e.message}}refresh();setInterval(refresh,2000);
+        refreshTranscripts();setInterval(refreshTranscripts,3000);
         </script></body></html>""";
 }

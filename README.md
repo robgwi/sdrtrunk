@@ -4,9 +4,9 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.6.2-beta-9
+## Current release: 0.7.0-beta-1
 
-- [Download Raspberry Pi ARM64 beta 9](https://github.com/robgwi/sdrtrunk/releases/tag/raspberry-pi-v0.6.2-beta-9)
+- [Download Raspberry Pi ARM64 0.7 beta 1](https://github.com/robgwi/sdrtrunk/releases/tag/raspberry-pi-v0.7.0-beta-1)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Upstream sdrtrunk wiki](https://github.com/DSheirer/sdrtrunk/wiki)
 
@@ -28,19 +28,19 @@ Signal strength is displayed as unavailable when a tuner does not expose calibra
 
 ### Web playlist management
 
-The beta-9 web channel and talkgroup editor can:
+The web channel and talkgroup editor can:
 
 - Create and delete channels.
 - Edit channel name, system, site, alias-list assignment, frequency, protocol, and auto-start.
 - Start and stop channels.
 - Add, edit, and delete talkgroup aliases in each channel's assigned alias list.
-- Supplement talkgroups previously imported through RadioReference without repeating the system import.
+- Configure and test a RadioReference Premium account, preview a trunked system by RadioReference System ID, and import its talkgroups into an alias list without duplicates.
 - Edit talkgroup name, category, protocol, numeric ID, recording flag, and playback priority.
 - Select the Remote Calls destinations that receive each talkgroup, using the same alias routing model as the desktop app.
 - Add, edit, enable, disable, and delete Remote Call API destinations, including authentication, retry, timeout, hosted Whisper, local Whisper, and translation settings.
 - Include the configured talkgroup alias in saved audio filenames for easier browsing and identification.
 
-Advanced protocol-specific decoder fields, non-talkgroup alias identifier types, and new online RadioReference system searches/imports still use the Java desktop Playlist Editor. Talkgroups from those imports can now be maintained or expanded in the web console.
+Advanced protocol-specific decoder fields and non-talkgroup alias identifier types still use the Java desktop Playlist Editor. RadioReference location browsing remains available in the desktop editor; the web console imports by system ID.
 
 ### Desktop Playlist Editor improvements
 
@@ -57,6 +57,15 @@ Advanced protocol-specific decoder fields, non-talkgroup alias identifier types,
 - Optionally translate supported audio to English through the hosted OpenAI workflow.
 - Existing Rdio Scanner uploads continue to use `<Rdio Scanner URL>/api/call-upload`.
 
+### Background scanner transcription
+
+- Runs the [robgwi Whisper fork](https://github.com/robgwi/whisper) as a separate background process, so SDR decoding remains in Java and does not wait for transcription.
+- Configures the executable, model, language, transcribe/translate task, timeout, scanner vocabulary prompt, numeric cleanup, and optional PII redaction from the web console.
+- Recognizes scanner phonetic-alphabet runs, compacts spoken digits and license plates, and shows completed transcripts with their talkgroup and alias.
+- Pins locations found from transcript text on an OpenStreetMap preview using Nominatim geocoding.
+
+Whisper, PyTorch, ffmpeg, and model weights are intentionally not bundled in the Java archive. On a Raspberry Pi, start with `tiny.en` or `base.en`; larger models may be too slow or memory-intensive.
+
 ## Raspberry Pi quick start
 
 This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Confirm that `uname -m` prints `aarch64`.
@@ -65,8 +74,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.6.2-beta-9.zip
-cd sdr-trunk-linux-aarch64-v0.6.2-beta-9
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-1.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-1
 bin/sdr-trunk
 ```
 
@@ -84,6 +93,15 @@ bin/sdr-trunk
 Environment variables override saved GUI token settings. Do not commit real keys or tokens to this repository.
 
 ## Release history
+
+### 0.7.0-beta-1
+
+- Redesigned the web console around a persistent top menu for dashboard, playlist, RadioReference, transcripts, Remote Calls, and settings.
+- Added web-based RadioReference Premium credential testing plus trunked-system talkgroup preview/import into an alias list, with protocol-aware values and duplicate protection.
+- Added queued background transcription through the `robgwi/whisper` command-line application.
+- Added web settings for Whisper model, language, task, executable, timeout, scanner vocabulary, number cleanup, PII redaction, and map region.
+- Added scanner phonetic-alphabet and numeric post-processing, transcript metadata, Nominatim address lookup, and OpenStreetMap pinning.
+- Added focused tests for scanner transcription normalization and PII redaction.
 
 ### 0.6.2-beta-9
 

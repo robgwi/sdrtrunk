@@ -12,11 +12,11 @@ sudo apt install libusb-1.0-0
 
 ## Install and run
 
-Copy `sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.6.2-beta-9.zip` to the Pi, then run:
+Copy `sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-1.zip` to the Pi, then run:
 
 ```bash
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.6.2-beta-9.zip
-cd sdr-trunk-linux-aarch64-v0.6.2-beta-9
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-1.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-1
 export SDRTRUNK_WEB_TOKEN='replace-with-a-long-random-token'
 bin/sdr-trunk
 ```
@@ -34,8 +34,24 @@ the same web access token as the rest of the remote API.
 The dashboard has a scanner-style activity display showing scanning/receiving state, active talkgroup, source radio,
 protocol, frequency, and recent decoded events.  Signal strength is shown as unavailable when the selected tuner does
 not expose calibrated RSSI through sdrtrunk's common tuner interface.  The web channel editor supports creating,
-editing, starting/stopping, and deleting playlist channels; advanced protocol-specific fields and RadioReference
-imports continue to use the desktop Playlist Editor in this beta.
+editing, starting/stopping, and deleting playlist channels. The top-menu RadioReference page can test Premium account
+credentials and preview/import talkgroups by RadioReference system ID. Desktop location browsing remains available.
+
+## Optional local Whisper transcription
+
+Whisper is separate from the Java package. Install ffmpeg, Python, and Rob's Whisper fork on the Pi, preferably in a
+virtual environment, then point **Settings > Whisper executable** in the web console at that environment's `whisper`
+command. The first use downloads the selected model weights.
+
+```bash
+sudo apt install ffmpeg python3-venv
+python3 -m venv "$PWD/whisper-env"
+"$PWD/whisper-env/bin/pip" install git+https://github.com/robgwi/whisper.git
+```
+
+For Raspberry Pi hardware, try `tiny.en` first, then `base.en` if performance is acceptable. Enable background
+transcription only after the executable path has been saved and tested. Transcript settings include the scanner
+vocabulary prompt, spoken-number and phonetic cleanup, optional PII redaction, and a city/region hint for map pins.
 
 When launched from a terminal in the Raspberry Pi desktop or VNC session, the Java desktop interface opens and the
 web interface runs at the same time.  When no graphical display is available, start it explicitly in headless mode:
