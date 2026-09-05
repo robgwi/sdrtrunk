@@ -12,11 +12,11 @@ sudo apt install libusb-1.0-0
 
 ## Install and run
 
-Copy `sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-1.zip` to the Pi, then run:
+Copy `sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-2.zip` to the Pi, then run:
 
 ```bash
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-1.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-1
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-2.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-2
 export SDRTRUNK_WEB_TOKEN='replace-with-a-long-random-token'
 bin/sdr-trunk
 ```
@@ -27,7 +27,8 @@ The saved token can be replaced while the desktop application is running from **
 `SDRTRUNK_WEB_TOKEN` environment variable overrides the saved GUI setting.
 
 The Playlist Editor also contains a **Web Interface** tab where you can save a replacement token and restart the web
-server without restarting sdrtrunk.  The web dashboard can play completed live radio calls as they arrive and lists
+server without restarting sdrtrunk. The web dashboard queues completed live radio calls, plays each one fully in
+order, and applies the selected hold time before the next call. It also lists
 the MP3/WAV files in the configured Audio Recordings directory for browser playback.  These audio endpoints require
 the same web access token as the rest of the remote API.
 

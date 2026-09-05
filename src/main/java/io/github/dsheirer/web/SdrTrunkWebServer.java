@@ -80,9 +80,10 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
     private final UserPreferences mUserPreferences;
     private final WebTranscriptionService mTranscriptionService = new WebTranscriptionService();
     private volatile String mToken;
-    private volatile byte[] mLatestAudio;
     private volatile Map<String,Object> mLatestAudioMetadata = Map.of();
     private final AtomicLong mLatestAudioSequence = new AtomicLong();
+    private static final int LIVE_AUDIO_QUEUE_LIMIT = 200;
+    private final ConcurrentLinkedDeque<LiveAudioCall> mLiveAudioQueue = new ConcurrentLinkedDeque<>();
     private final ConcurrentLinkedDeque<Map<String,Object>> mActivity = new ConcurrentLinkedDeque<>();
     private HttpServer mServer;
 
@@ -664,9 +665,14 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
                     metadata.put("duration", segment.getDuration());
                     metadata.put("audioLevelDbfs", audioLevelDbfs(segment));
                     metadata.put("rfSignalAvailable", false);
-                    mLatestAudio = audio;
-                    metadata.put("sequence", mLatestAudioSequence.incrementAndGet());
-                    mLatestAudioMetadata = metadata;
+                    synchronized(mLiveAudioQueue)
+                    {
+                        long sequence = mLatestAudioSequence.incrementAndGet();
+                        metadata.put("sequence", sequence);
+                        mLatestAudioMetadata = Map.copyOf(metadata);
+                        mLiveAudioQueue.addLast(new LiveAudioCall(sequence, audio, Map.copyOf(metadata)));
+                        while(mLiveAudioQueue.size() > LIVE_AUDIO_QUEUE_LIMIT) { mLiveAudioQueue.pollFirst(); }
+                    }
                     mTranscriptionService.submit(audio, new LinkedHashMap<>(metadata));
                 }
             }
@@ -684,23 +690,30 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
     private void liveAudio(HttpExchange exchange) throws IOException
     {
         if(!"GET".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
-        byte[] audio = mLatestAudio;
         long requested = longQueryValue(exchange, "after", -1);
-        long sequence = mLatestAudioSequence.get();
-        if(audio == null || requested >= sequence)
+        LiveAudioCall call = mLiveAudioQueue.stream().filter(item -> item.sequence() > requested)
+            .findFirst().orElse(null);
+        if(call == null)
         {
             exchange.sendResponseHeaders(204, -1);
             exchange.close();
             return;
         }
-        exchange.getResponseHeaders().set("X-Audio-Sequence", Long.toString(sequence));
-        bytes(exchange, 200, "audio/mpeg", audio);
+        long queued = mLiveAudioQueue.stream().filter(item -> item.sequence() > call.sequence()).count();
+        exchange.getResponseHeaders().set("X-Audio-Sequence", Long.toString(call.sequence()));
+        exchange.getResponseHeaders().set("X-Audio-Queued", Long.toString(queued));
+        bytes(exchange, 200, "audio/mpeg", call.audio());
     }
 
     private void liveStatus(HttpExchange exchange) throws IOException
     {
         if(!"GET".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
-        Map<String,Object> status = new LinkedHashMap<>(mLatestAudioMetadata);
+        long requested = longQueryValue(exchange, "sequence", -1);
+        Map<String,Object> source = requested < 0 ? mLatestAudioMetadata : mLiveAudioQueue.stream()
+            .filter(item -> item.sequence() == requested).map(LiveAudioCall::metadata)
+            .findFirst().orElse(mLatestAudioMetadata);
+        Map<String,Object> status = new LinkedHashMap<>(source);
+        status.put("queued", mLiveAudioQueue.stream().filter(item -> item.sequence() > requested).count());
         Object level = status.get("audioLevelDbfs");
         if(level instanceof Number number && !Double.isFinite(number.doubleValue()))
         {
@@ -708,6 +721,8 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         }
         json(exchange, 200, status);
     }
+
+    private record LiveAudioCall(long sequence, byte[] audio, Map<String,Object> metadata) {}
 
     private static double audioLevelDbfs(AudioSegment segment)
     {
@@ -977,18 +992,19 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         <dialog id="talkgroupDialog"><form id="talkgroupForm"><input name="id" type="hidden"><h2>Talkgroup / Alias</h2><div class="cards"><label>Alias list<br><input name="aliasList" required></label><label>Talkgroup ID<br><input name="talkgroup" type="number" min="0" required></label><label>Talkgroup name / alias<br><input name="name" required></label><label>Category / group<br><input name="group"></label><label>Protocol<br><select name="protocol"><option value="APCO25">P25</option><option>DMR</option><option>NXDN</option><option>LTR</option><option>LTR_NET</option><option>MPT1327</option><option>PASSPORT</option><option>NBFM</option><option>AM</option></select></label><label>Playback priority<br><input name="priority" type="number" min="1" max="100" value="100"></label></div><p><label><input name="record" type="checkbox"> Record calls</label></p><fieldset><legend>Send calls to Remote Calls destinations</legend><div id="talkgroupRemoteCalls" class="cards"></div></fieldset><p><button type="submit">Save</button> <button type="button" onclick="talkgroupDialog.close()">Cancel</button> <button id="deleteTalkgroup" type="button">Delete</button> <span id="talkgroupResult" class="muted"></span></p></form></dialog>
         <dialog id="remoteDialog"><form id="remoteForm"><input name="originalName" type="hidden"><h2>Remote Call API Destination</h2><div class="cards"><label>Name<br><input name="name" required></label><label>POST URL<br><input name="url" type="url" required></label><label>API key environment variable<br><input name="apiKeyEnvironmentVariable" value="SDRTRUNK_REMOTE_API_KEY"></label><label>Authentication header<br><input name="authenticationHeader" value="Authorization"></label><label>Authentication prefix<br><input name="authenticationPrefix" value="Bearer "></label><label>Retries<br><input name="maximumRetries" type="number" min="0" value="5"></label><label>Concurrent uploads<br><input name="maximumConcurrentUploads" type="number" min="1" value="2"></label><label>Timeout seconds<br><input name="requestTimeoutSeconds" type="number" min="1" value="60"></label><label>Maximum call age seconds<br><input name="maximumRecordingAgeSeconds" type="number" min="1" value="600"></label><label>OpenAI key environment variable<br><input name="openAiKeyEnvironmentVariable" value="OPENAI_API_KEY"></label><label>Local Whisper executable<br><input name="localWhisperExecutable"></label><label>Local Whisper model<br><input name="localWhisperModel"></label></div><p><label><input name="enabled" type="checkbox" checked> Enabled</label> <label><input name="openAiEnabled" type="checkbox"> OpenAI Whisper</label> <label><input name="translateToEnglish" type="checkbox"> Translate to English</label></p><button type="submit">Save</button> <button type="button" onclick="remoteDialog.close()">Cancel</button> <button id="deleteRemote" type="button">Delete</button> <span id="remoteResult" class="muted"></span></form></dialog>
         </main><script>
-        document.querySelector('.scanner').id='dashboard';[...document.querySelectorAll('section')].find(s=>s.querySelector('h2')?.textContent.startsWith('Playlist Channels')).id='playlist';
+        document.querySelector('.scanner').id='dashboard';[...document.querySelectorAll('section')].find(s=>s.querySelector('h2')?.textContent.startsWith('Playlist Channels')).id='playlist';document.querySelector('.scanner-line').insertAdjacentHTML('afterend','<p><label>Hold between calls <input id="liveHold" type="number" min="0" max="10" step="0.1" style="width:70px"> seconds</label> <span id="liveQueue" class="muted">0 queued</span></p>');
         const esc=s=>String(s??'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
         const mhz=n=>n?`${(n/1e6).toFixed(5)} MHz`:'—'; const mb=n=>n?`${(n/1048576).toFixed(1)} MB`:'—';
         let apiToken=localStorage.getItem('sdrtrunkWebToken')||'';token.value=apiToken;
         const apiHeaders=json=>Object.assign(json?{'Content-Type':'application/json'}:{},apiToken?{'Authorization':'Bearer '+apiToken}:{});
         saveToken.addEventListener('click',()=>{apiToken=token.value.trim();localStorage.setItem('sdrtrunkWebToken',apiToken);refresh()});
-        let liveOn=false,liveSequence=-1,audioUrl=null;
-        liveToggle.addEventListener('click',()=>{liveOn=!liveOn;liveToggle.textContent=liveOn?'Stop Live Listening':'Start Live Listening';liveStatus.textContent=liveOn?'Waiting for traffic':'Off';if(liveOn)pollLive()});
+        let liveOn=false,liveSequence=-1,audioUrl=null,liveFinish=null;liveHold.value=localStorage.getItem('sdrtrunkLiveHold')||'0.7';liveHold.addEventListener('change',()=>localStorage.setItem('sdrtrunkLiveHold',String(Math.max(0,Number(liveHold.value)||0))));
+        liveToggle.addEventListener('click',async()=>{liveOn=!liveOn;liveToggle.textContent=liveOn?'Stop Live Listening':'Start Live Listening';liveStatus.textContent=liveOn?'Waiting for the next call':'Off';if(liveOn){if(liveSequence<0){try{const current=await fetch('/api/v1/live-status',{headers:apiHeaders(false)}).then(r=>r.json());liveSequence=Number(current.sequence||0)}catch(e){}}pollLive()}else{audioPlayer.pause();if(liveFinish)liveFinish()}});
         async function useAudio(r,label){if(!r.ok)return;if(audioUrl)URL.revokeObjectURL(audioUrl);audioUrl=URL.createObjectURL(await r.blob());audioPlayer.src=audioUrl;liveStatus.textContent=label;try{await audioPlayer.play()}catch(e){liveStatus.textContent=label+' — press Play'}}
         function showLive(m){if(!m||!m.sequence)return;activeTalkgroup.textContent=m.talkgroup||'—';activeAlias.textContent=m.alias||'Unidentified';activeFrequency.textContent=mhz(m.frequency);activeSource.textContent=m.source||'—';signalText.textContent=m.rfSignalAvailable?m.rfSignalDbm+' dBm':'Unavailable';const db=Number(m.audioLevelDbfs);audioLevelText.textContent=Number.isFinite(db)?db.toFixed(1)+' dBFS':'—';signalMeter.style.width=Number.isFinite(db)?Math.max(0,Math.min(100,(db+60)/60*100))+'%':'0'}
-        async function pollLive(){if(!liveOn)return;try{const r=await fetch('/api/v1/live-audio?after='+liveSequence,{headers:apiHeaders(false)});if(r.status===200){liveSequence=Number(r.headers.get('X-Audio-Sequence'));const status=await fetch('/api/v1/live-status',{headers:apiHeaders(false)}).then(x=>x.json());showLive(status);await useAudio(r,'Playing '+(status.alias||status.talkgroup||'live traffic'))}}catch(e){liveStatus.textContent=e.message}finally{if(liveOn)setTimeout(pollLive,1000)}}
-        async function playRecording(name){const r=await fetch('/api/v1/recording-audio?name='+encodeURIComponent(name),{headers:apiHeaders(false)});await useAudio(r,'Playing '+name)}
+        async function playLive(r,status){if(audioUrl)URL.revokeObjectURL(audioUrl);audioUrl=URL.createObjectURL(await r.blob());audioPlayer.src=audioUrl;showLive(status);liveStatus.textContent='Playing '+(status.alias||status.talkgroup||'live traffic');const ended=new Promise(resolve=>{liveFinish=resolve;audioPlayer.onended=resolve;audioPlayer.onerror=resolve});try{await audioPlayer.play()}catch(e){liveStatus.textContent+=' — press Play'}await ended;liveFinish=null;if(liveOn){const hold=Math.max(0,Number(liveHold.value)||0);liveStatus.textContent=hold?'Holding '+hold.toFixed(1)+' seconds':'Loading next call';await new Promise(resolve=>setTimeout(resolve,hold*1000))}}
+        async function pollLive(){if(!liveOn)return;try{const r=await fetch('/api/v1/live-audio?after='+liveSequence,{headers:apiHeaders(false)});if(r.status===200){liveSequence=Number(r.headers.get('X-Audio-Sequence'));liveQueue.textContent=(r.headers.get('X-Audio-Queued')||'0')+' queued';const status=await fetch('/api/v1/live-status?sequence='+liveSequence,{headers:apiHeaders(false)}).then(x=>x.json());await playLive(r,status)}}catch(e){liveStatus.textContent=e.message}finally{if(liveOn)setTimeout(pollLive,250)}}
+        async function playRecording(name){if(liveOn){liveOn=false;liveToggle.textContent='Start Live Listening';audioPlayer.pause();if(liveFinish)liveFinish()}const r=await fetch('/api/v1/recording-audio?name='+encodeURIComponent(name),{headers:apiHeaders(false)});await useAudio(r,'Playing '+name)}
         async function control(name,action){await fetch('/api/v1/channel-control',{method:'POST',headers:apiHeaders(true),body:JSON.stringify({name,action})});refresh()}
         let channelCache=[];
         function openChannelEditor(id){const x=channelCache.find(c=>c.id===id)||{};channelForm.reset();for(const k of ['id','name','system','site','frequency','decoder','aliasList'])if(x[k]!=null)channelForm.elements[k].value=x[k];channelForm.elements.autoStart.checked=!!x.autoStart;deleteChannel.style.display=id==null?'none':'inline-block';channelResult.textContent='';channelDialog.showModal()}

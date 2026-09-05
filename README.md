@@ -4,9 +4,9 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.7.0-beta-1
+## Current release: 0.7.0-beta-2
 
-- [Download Raspberry Pi ARM64 0.7 beta 1](https://github.com/robgwi/sdrtrunk/releases/tag/raspberry-pi-v0.7.0-beta-1)
+- [Download Raspberry Pi ARM64 0.7 beta 2](https://github.com/robgwi/sdrtrunk/releases/tag/raspberry-pi-v0.7.0-beta-2)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Upstream sdrtrunk wiki](https://github.com/DSheirer/sdrtrunk/wiki)
 
@@ -19,7 +19,8 @@ The Raspberry Pi archive contains its own ARM64 Java and JavaFX runtime. A separ
 - Runs alongside both the desktop and headless application.
 - Shows scanning/receiving state, talkgroup ID and configured alias/name, source radio, protocol, frequency, and recent decoded activity.
 - Starts and stops configured channels remotely.
-- Plays completed live calls in the top scanner panel with call metadata and a measured audio-level meter.
+- Queues completed live calls in order and plays every call to completion before applying the configurable between-call hold time.
+- Shows the current call metadata, measured audio level, and number of waiting calls in the top scanner panel.
 - Lists and plays MP3/WAV recordings from the configured recording directory.
 - Shows tuner, channel, CPU, memory, and streaming-destination status.
 - Uses bearer-token authentication for non-local API requests.
@@ -74,8 +75,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-1.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-1
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-2.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-2
 bin/sdr-trunk
 ```
 
@@ -93,6 +94,15 @@ bin/sdr-trunk
 Environment variables override saved GUI token settings. Do not commit real keys or tokens to this repository.
 
 ## Release history
+
+### 0.7.0-beta-2
+
+- Fixed Live Listening replacing an in-progress call when the next completed audio file arrived.
+- Added an ordered server-side buffer of up to 200 completed calls so bursts are not lost between browser polls.
+- Made the browser wait for each call to finish before fetching and playing the next queued call.
+- Added a browser-persisted hold-time setting, defaulting to 0.7 seconds between calls, plus a queued-call count.
+- Kept displayed talkgroup, alias, source, frequency, and signal metadata synchronized with the call actually playing.
+- Made manual Recorded Audio playback stop Live Listening explicitly instead of silently replacing its audio.
 
 ### 0.7.0-beta-1
 
