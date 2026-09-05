@@ -4,9 +4,9 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.6.2-beta-4
+## Current release: 0.6.2-beta-5
 
-- [Download Raspberry Pi ARM64 beta 4](https://github.com/robgwi/sdrtrunk/releases/tag/raspberry-pi-v0.6.2-beta-4)
+- [Download Raspberry Pi ARM64 beta 5](https://github.com/robgwi/sdrtrunk/releases/tag/raspberry-pi-v0.6.2-beta-5)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Upstream sdrtrunk wiki](https://github.com/DSheirer/sdrtrunk/wiki)
 
@@ -28,13 +28,18 @@ Signal strength is displayed as unavailable when a tuner does not expose calibra
 
 ### Web playlist management
 
-The beta-4 web channel editor can:
+The beta-5 web channel and talkgroup editor can:
 
 - Create and delete channels.
 - Edit channel name, system, site, alias-list assignment, frequency, protocol, and auto-start.
 - Start and stop channels.
+- Add, edit, and delete talkgroup aliases in each channel's assigned alias list.
+- Supplement talkgroups previously imported through RadioReference without repeating the system import.
+- Edit talkgroup name, category, protocol, numeric ID, recording flag, and playback priority.
+- Select the Remote Calls destinations that receive each talkgroup, using the same alias routing model as the desktop app.
+- Add, edit, enable, disable, and delete Remote Call API destinations, including authentication, retry, timeout, hosted Whisper, local Whisper, and translation settings.
 
-Advanced protocol-specific decoder fields, complete alias editing, all streaming forms, and RadioReference imports still use the Java desktop Playlist Editor. They are planned for later web-management phases.
+Advanced protocol-specific decoder fields, non-talkgroup alias identifier types, and new online RadioReference system searches/imports still use the Java desktop Playlist Editor. Talkgroups from those imports can now be maintained or expanded in the web console.
 
 ### Desktop Playlist Editor improvements
 
@@ -59,8 +64,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.6.2-beta-4.zip
-cd sdr-trunk-linux-aarch64-v0.6.2-beta-4
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.6.2-beta-5.zip
+cd sdr-trunk-linux-aarch64-v0.6.2-beta-5
 bin/sdr-trunk
 ```
 
@@ -78,6 +83,14 @@ bin/sdr-trunk
 Environment variables override saved GUI token settings. Do not commit real keys or tokens to this repository.
 
 ## Release history
+
+### 0.6.2-beta-5
+
+- Expanded web Playlist Channels management with talkgroup and alias maintenance.
+- Added manual talkgroup additions for supplementing RadioReference-imported systems.
+- Added talkgroup recording, playback-priority, and per-Remote-Calls destination routing controls.
+- Upgraded Remote Calls management from add-only to complete add, edit, enable/disable, and delete workflows.
+- Exposed Remote Calls authentication, retry, concurrency, timeout, maximum-age, local Whisper, hosted Whisper, and translation settings.
 
 ### 0.6.2-beta-4
 

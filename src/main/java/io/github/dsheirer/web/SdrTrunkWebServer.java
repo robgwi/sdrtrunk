@@ -8,6 +8,7 @@ import com.sun.net.httpserver.HttpServer;
 import io.github.dsheirer.audio.broadcast.AbstractAudioBroadcaster;
 import io.github.dsheirer.audio.broadcast.BroadcastConfiguration;
 import io.github.dsheirer.audio.broadcast.BroadcastModel;
+import io.github.dsheirer.audio.broadcast.BroadcastEvent;
 import io.github.dsheirer.audio.broadcast.ConfiguredBroadcast;
 import io.github.dsheirer.audio.broadcast.remote.RemoteApiConfiguration;
 import io.github.dsheirer.audio.AudioSegment;
@@ -26,6 +27,9 @@ import io.github.dsheirer.identifier.Form;
 import io.github.dsheirer.identifier.configuration.ConfigurationLongIdentifier;
 import io.github.dsheirer.alias.Alias;
 import io.github.dsheirer.alias.AliasList;
+import io.github.dsheirer.alias.id.AliasID;
+import io.github.dsheirer.alias.id.broadcast.BroadcastChannel;
+import io.github.dsheirer.alias.id.talkgroup.Talkgroup;
 import io.github.dsheirer.controller.channel.Channel;
 import io.github.dsheirer.controller.channel.ChannelProcessingManager;
 import io.github.dsheirer.controller.channel.ChannelEvent;
@@ -33,6 +37,7 @@ import io.github.dsheirer.module.decode.DecoderFactory;
 import io.github.dsheirer.module.decode.DecoderType;
 import io.github.dsheirer.source.config.SourceConfigTuner;
 import io.github.dsheirer.monitor.ResourceMonitor;
+import io.github.dsheirer.protocol.Protocol;
 import io.github.dsheirer.playlist.PlaylistManager;
 import io.github.dsheirer.source.tuner.Tuner;
 import io.github.dsheirer.source.tuner.manager.DiscoveredTuner;
@@ -126,6 +131,7 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         mServer.createContext("/api/v1/health", exchange -> json(exchange, 200, Map.of("status", "ok")));
         mServer.createContext("/api/v1/status", authenticated(this::status));
         mServer.createContext("/api/v1/channels", authenticated(this::channels));
+        mServer.createContext("/api/v1/talkgroups", authenticated(this::talkgroups));
         mServer.createContext("/api/v1/tuners", authenticated(this::tuners));
         mServer.createContext("/api/v1/broadcasters", authenticated(this::broadcasters));
         mServer.createContext("/api/v1/remote-destinations", authenticated(this::remoteDestinations));
@@ -367,14 +373,40 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
 
     private void remoteDestinations(HttpExchange exchange) throws IOException
     {
+        if("GET".equals(exchange.getRequestMethod()))
+        {
+            List<Map<String,Object>> result = new ArrayList<>();
+            for(ConfiguredBroadcast configured: mPlaylistManager.getBroadcastModel().getConfiguredBroadcasts())
+            {
+                if(configured.getBroadcastConfiguration() instanceof RemoteApiConfiguration configuration)
+                {
+                    result.add(remoteDestinationMap(configuration));
+                }
+            }
+            json(exchange, 200, result);
+            return;
+        }
         if(!"POST".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
         try
         {
             JsonObject request = GSON.fromJson(new String(exchange.getRequestBody().readAllBytes(),
                 StandardCharsets.UTF_8), JsonObject.class);
+            String action = stringValue(request, "action", "create");
+            String originalName = stringValue(request, "originalName", null);
+            RemoteApiConfiguration configuration = findRemoteDestination(originalName);
+            if("delete".equalsIgnoreCase(action))
+            {
+                if(configuration == null) { json(exchange, 404, Map.of("error", "destination not found")); return; }
+                mPlaylistManager.getBroadcastModel().removeBroadcastConfiguration(configuration);
+                json(exchange, 200, Map.of("deleted", originalName));
+                return;
+            }
+            boolean creating = configuration == null;
+            if(!creating && !"update".equalsIgnoreCase(action))
+            { json(exchange, 409, Map.of("error", "destination already exists")); return; }
+            if(creating) { configuration = new RemoteApiConfiguration(); }
             String name = requiredString(request, "name");
             String url = requiredString(request, "url");
-            RemoteApiConfiguration configuration = new RemoteApiConfiguration();
             configuration.setName(name);
             configuration.setHost(url);
             configuration.setEnabled(booleanValue(request, "enabled", true));
@@ -392,24 +424,135 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
             configuration.setLocalWhisperExecutable(stringValue(request, "localWhisperExecutable", null));
             configuration.setLocalWhisperModel(stringValue(request, "localWhisperModel", null));
             configuration.setMaximumRecordingAge(integerValue(request, "maximumRecordingAgeSeconds", 600) * 1000L);
-            ConfiguredBroadcast created = mPlaylistManager.getBroadcastModel().addBroadcastConfiguration(configuration);
-            if(created == null)
+            if(creating)
             {
-                json(exchange, 409, Map.of("error", "destination already exists"));
-                return;
+                mPlaylistManager.getBroadcastModel().addBroadcastConfiguration(configuration);
             }
-            Map<String, Object> response = new LinkedHashMap<>();
-            response.put("name", configuration.getName());
-            response.put("url", configuration.getHost());
-            response.put("enabled", configuration.isEnabled());
-            response.put("apiKeyEnvironmentVariable", configuration.getApiKeyEnvironmentVariable());
-            response.put("openAiEnabled", configuration.isOpenAiEnabled());
-            response.put("translateToEnglish", configuration.isTranslateToEnglish());
-            json(exchange, 201, response);
+            else
+            {
+                mPlaylistManager.getBroadcastModel().process(new BroadcastEvent(configuration,
+                    BroadcastEvent.Event.CONFIGURATION_CHANGE));
+            }
+            mPlaylistManager.schedulePlaylistSave();
+            json(exchange, creating ? 201 : 200, remoteDestinationMap(configuration));
         }
         catch(IllegalArgumentException e)
         {
             json(exchange, 400, Map.of("error", e.getMessage()));
+        }
+    }
+
+    private RemoteApiConfiguration findRemoteDestination(String name)
+    {
+        if(name == null) { return null; }
+        return mPlaylistManager.getBroadcastModel().getBroadcastConfigurations().stream()
+            .filter(RemoteApiConfiguration.class::isInstance).map(RemoteApiConfiguration.class::cast)
+            .filter(item -> name.equals(item.getName())).findFirst().orElse(null);
+    }
+
+    private static Map<String,Object> remoteDestinationMap(RemoteApiConfiguration configuration)
+    {
+        Map<String,Object> value = new LinkedHashMap<>();
+        value.put("name", configuration.getName());
+        value.put("url", configuration.getHost());
+        value.put("enabled", configuration.isEnabled());
+        value.put("apiKeyEnvironmentVariable", configuration.getApiKeyEnvironmentVariable());
+        value.put("authenticationHeader", configuration.getAuthenticationHeader());
+        value.put("authenticationPrefix", configuration.getAuthenticationPrefix());
+        value.put("maximumRetries", configuration.getMaximumRetries());
+        value.put("maximumConcurrentUploads", configuration.getMaximumConcurrentUploads());
+        value.put("requestTimeoutSeconds", configuration.getRequestTimeoutSeconds());
+        value.put("maximumRecordingAgeSeconds", configuration.getMaximumRecordingAge() / 1000L);
+        value.put("openAiEnabled", configuration.isOpenAiEnabled());
+        value.put("translateToEnglish", configuration.isTranslateToEnglish());
+        value.put("openAiKeyEnvironmentVariable", configuration.getOpenAiKeyEnvironmentVariable());
+        value.put("localWhisperExecutable", configuration.getLocalWhisperExecutable());
+        value.put("localWhisperModel", configuration.getLocalWhisperModel());
+        return value;
+    }
+
+    /** Talkgroup aliases shared by web channel editing, RadioReference supplements and Remote Calls. */
+    private void talkgroups(HttpExchange exchange) throws IOException
+    {
+        if("GET".equals(exchange.getRequestMethod()))
+        {
+            List<Map<String,Object>> result = new ArrayList<>();
+            List<Alias> aliases = mPlaylistManager.getAliasModel().getAliases();
+            for(int index = 0; index < aliases.size(); index++)
+            {
+                Alias alias = aliases.get(index);
+                for(AliasID identifier: alias.getAliasIdentifiers())
+                {
+                    if(identifier instanceof Talkgroup talkgroup)
+                    {
+                        Map<String,Object> value = new LinkedHashMap<>();
+                        value.put("id", index);
+                        value.put("name", alias.getName());
+                        value.put("group", alias.getGroup());
+                        value.put("aliasList", alias.getAliasListName());
+                        value.put("protocol", talkgroup.getProtocol().name());
+                        value.put("talkgroup", talkgroup.getValue());
+                        value.put("record", alias.isRecordable());
+                        value.put("priority", alias.getPlaybackPriority());
+                        value.put("remoteCalls", alias.getBroadcastChannels().stream()
+                            .map(item -> item.getChannelName()).toList());
+                        result.add(value);
+                    }
+                }
+            }
+            json(exchange, 200, result);
+            return;
+        }
+        if(!"POST".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
+        try
+        {
+            JsonObject request = GSON.fromJson(new String(exchange.getRequestBody().readAllBytes(),
+                StandardCharsets.UTF_8), JsonObject.class);
+            String action = stringValue(request, "action", "create");
+            int id = integerValue(request, "id", -1);
+            List<Alias> aliases = mPlaylistManager.getAliasModel().aliasList();
+            Alias alias = id >= 0 && id < aliases.size() ? aliases.get(id) : null;
+            if("delete".equalsIgnoreCase(action))
+            {
+                if(alias == null) { json(exchange, 404, Map.of("error", "talkgroup alias not found")); return; }
+                mPlaylistManager.getAliasModel().removeAlias(alias);
+                json(exchange, 200, Map.of("deleted", id));
+                return;
+            }
+            boolean creating = alias == null;
+            if(creating) { alias = new Alias(requiredString(request, "name")); }
+            alias.setName(requiredString(request, "name"));
+            alias.setAliasListName(requiredString(request, "aliasList"));
+            alias.setGroup(stringValue(request, "group", null));
+            alias.setRecordable(booleanValue(request, "record", false));
+            alias.setCallPriority(integerValue(request, "priority", 100));
+            Protocol protocol = Protocol.valueOf(requiredString(request, "protocol"));
+            int value = integerValue(request, "talkgroup", -1);
+            Talkgroup talkgroup = alias.getAliasIdentifiers().stream().filter(Talkgroup.class::isInstance)
+                .map(Talkgroup.class::cast).findFirst().orElse(null);
+            if(talkgroup == null) { talkgroup = new Talkgroup(protocol, value); alias.addAliasID(talkgroup); }
+            else { talkgroup.setProtocol(protocol); talkgroup.setValue(value); }
+            alias.removeAllBroadcastChannels();
+            if(request.has("remoteCalls") && request.get("remoteCalls").isJsonArray())
+            {
+                for(var item: request.getAsJsonArray("remoteCalls"))
+                {
+                    alias.addAliasID(new BroadcastChannel(item.getAsString()));
+                }
+            }
+            if(!talkgroup.isValid()) { throw new IllegalArgumentException("talkgroup is outside the valid range for " + protocol); }
+            if(creating) { mPlaylistManager.getAliasModel().addAlias(alias); }
+            else
+            {
+                mPlaylistManager.getAliasModel().removeAlias(alias);
+                mPlaylistManager.getAliasModel().addAlias(alias);
+            }
+            mPlaylistManager.schedulePlaylistSave();
+            json(exchange, creating ? 201 : 200, Map.of("saved", alias.getName()));
+        }
+        catch(Exception e)
+        {
+            json(exchange, 400, Map.of("error", e.getMessage() != null ? e.getMessage() : "invalid talkgroup"));
         }
     }
 
@@ -661,17 +804,20 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
         <title>sdrtrunk web</title><style>
         :root{color-scheme:dark;--bg:#091017;--panel:#111d27;--line:#263847;--text:#e9f2f7;--muted:#8da5b4;--accent:#38d39f}
-        *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,sans-serif}header{padding:20px 28px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:15px;justify-content:space-between;flex-wrap:wrap}h1{margin:0;font-size:21px}main{padding:22px;display:grid;gap:18px}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.card,section{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}.value{font-size:24px;color:var(--accent);margin-top:7px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px;border-bottom:1px solid var(--line)}th,.muted{color:var(--muted)}button{background:var(--accent);border:0;border-radius:5px;padding:6px 10px;color:#05251b;font-weight:700}input{background:#0a141c;color:var(--text);border:1px solid var(--line);border-radius:5px;padding:7px}h2{font-size:16px;margin:0 0 12px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.scanner{background:#06100d;border:1px solid #267c60}.scanner-line{display:flex;gap:24px;align-items:center;flex-wrap:wrap}.scan-state{font-size:24px;color:#67ffc5;letter-spacing:2px}.receiving{color:#ffca58}.meter{height:12px;width:160px;background:#18252c;border-radius:6px;overflow:hidden}.meter span{display:block;height:100%;background:linear-gradient(90deg,#37d79d,#ffd05a,#ff5e5e)}@media(max-width:850px){.grid{grid-template-columns:1fr}}
+        *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,sans-serif}header{padding:20px 28px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:15px;justify-content:space-between;flex-wrap:wrap}h1{margin:0;font-size:21px}main{padding:22px;display:grid;gap:18px}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.card,section{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}.value{font-size:24px;color:var(--accent);margin-top:7px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px;border-bottom:1px solid var(--line)}th,.muted{color:var(--muted)}button{background:var(--accent);border:0;border-radius:5px;padding:6px 10px;color:#05251b;font-weight:700}input,select,textarea{background:#0a141c;color:var(--text);border:1px solid var(--line);border-radius:5px;padding:7px}textarea{width:100%}dialog{color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:10px;max-width:760px}h2{font-size:16px;margin:0 0 12px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.scanner{background:#06100d;border:1px solid #267c60}.scanner-line{display:flex;gap:24px;align-items:center;flex-wrap:wrap}.scan-state{font-size:24px;color:#67ffc5;letter-spacing:2px}.receiving{color:#ffca58}.meter{height:12px;width:160px;background:#18252c;border-radius:6px;overflow:hidden}.meter span{display:block;height:100%;background:linear-gradient(90deg,#37d79d,#ffd05a,#ff5e5e)}@media(max-width:850px){.grid{grid-template-columns:1fr}}
         </style></head><body><header><h1>sdrtrunk web console</h1><div><input id="token" type="password" placeholder="Web access token" autocomplete="current-password"> <button id="saveToken">Connect</button></div><span id="updated" class="muted">connecting</span></header><main>
         <section class="scanner"><h2>Live Traffic Scanner</h2><div class="scanner-line"><div><div class="muted">SCANNER</div><div id="scanState" class="scan-state">SCANNING</div></div><div><div class="muted">TALKGROUP ID</div><div class="value" id="activeTalkgroup">—</div></div><div><div class="muted">TALKGROUP ALIAS</div><div class="value" id="activeAlias">—</div></div><div><div class="muted">FREQUENCY</div><div class="value" id="activeFrequency">—</div></div><div><div class="muted">SOURCE RADIO</div><div class="value" id="activeSource">—</div></div><div><div class="muted">RF SIGNAL</div><div id="signalText">Unavailable</div></div><div><div class="muted">AUDIO LEVEL</div><div id="audioLevelText">—</div><div class="meter"><span id="signalMeter" style="width:0"></span></div></div></div><p><button id="liveToggle">Start Live Listening</button> <span id="liveStatus" class="muted">Off</span></p><audio id="audioPlayer" controls></audio></section>
         <div class="cards"><div class="card">CPU<div class="value" id="cpu">—</div></div><div class="card">Memory<div class="value" id="memory">—</div></div><div class="card">Tuners<div class="value" id="tunerCount">—</div></div><div class="card">Active channels<div class="value" id="activeCount">—</div></div></div>
         <div class="grid"><section><h2>Tuners</h2><table><thead><tr><th>Name</th><th>Status</th><th>Frequency</th></tr></thead><tbody id="tuners"></tbody></table></section>
         <section><h2>Streaming destinations</h2><table><thead><tr><th>Name</th><th>Type</th><th>State</th><th>Queue</th></tr></thead><tbody id="streams"></tbody></table></section></div>
         <section><h2>Playlist Channels <button onclick="openChannelEditor()">New Channel</button></h2><table><thead><tr><th>System</th><th>Site</th><th>Name</th><th>Decoder</th><th>Status</th><th>Control</th></tr></thead><tbody id="channels"></tbody></table></section>
+        <section><h2>Talkgroups &amp; Aliases <button onclick="openTalkgroupEditor()">Add Talkgroup</button></h2><p class="muted">Add or edit talkgroups imported from RadioReference. Assigning a Remote Call destination controls which calls are sent there.</p><table><thead><tr><th>Alias List</th><th>Talkgroup</th><th>Name</th><th>Group</th><th>Protocol</th><th>Record</th><th>Remote Calls</th><th></th></tr></thead><tbody id="talkgroups"></tbody></table></section>
         <section><h2>Recorded audio</h2><table><thead><tr><th>File</th><th>Date</th><th>Size</th><th></th></tr></thead><tbody id="recordings"></tbody></table></section>
         <section><h2>Recent scanner activity</h2><table><thead><tr><th>Time</th><th>Talkgroup</th><th>Alias</th><th>Source</th><th>Protocol</th><th>Frequency</th><th>Event</th></tr></thead><tbody id="activity"></tbody></table></section>
-        <section><h2>Add Remote Call API destination</h2><form id="remoteForm" class="cards"><label>Name<br><input name="name" required></label><label>POST URL<br><input name="url" type="url" required></label><label>API key environment variable<br><input name="apiKeyEnvironmentVariable" value="SDRTRUNK_REMOTE_API_KEY"></label><label><input name="openAiEnabled" type="checkbox"> OpenAI Whisper</label><label><input name="translateToEnglish" type="checkbox"> Translate to English</label><div><button type="submit">Add destination</button> <span id="remoteResult" class="muted"></span></div></form></section>
+        <section><h2>Remote Calls <button onclick="openRemoteEditor()">Add Destination</button></h2><table><thead><tr><th>Name</th><th>POST URL</th><th>Status</th><th>Transcription</th><th></th></tr></thead><tbody id="remoteDestinations"></tbody></table></section>
         <dialog id="channelDialog"><form id="channelForm"><input name="id" type="hidden"><h2>Edit Playlist Channel</h2><p><label>Name<br><input name="name" required></label></p><p><label>System<br><input name="system"></label> <label>Site<br><input name="site"></label></p><p><label>Frequency (Hz)<br><input name="frequency" type="number" min="0"></label> <label>Protocol<br><select name="decoder"><option>AM</option><option>DMR</option><option>LTR</option><option>LTR_NET</option><option>MPT1327</option><option>NBFM</option><option>NXDN</option><option>PASSPORT</option><option>P25_PHASE1</option><option>P25_PHASE2</option></select></label></p><p><label>Alias list<br><input name="aliasList"></label> <label><input name="autoStart" type="checkbox"> Auto-start</label></p><button type="submit">Save</button> <button type="button" onclick="channelDialog.close()">Cancel</button> <button id="deleteChannel" type="button">Delete</button><span id="channelResult" class="muted"></span></form></dialog>
+        <dialog id="talkgroupDialog"><form id="talkgroupForm"><input name="id" type="hidden"><h2>Talkgroup / Alias</h2><div class="cards"><label>Alias list<br><input name="aliasList" required></label><label>Talkgroup ID<br><input name="talkgroup" type="number" min="0" required></label><label>Talkgroup name / alias<br><input name="name" required></label><label>Category / group<br><input name="group"></label><label>Protocol<br><select name="protocol"><option value="APCO25">P25</option><option>DMR</option><option>NXDN</option><option>LTR</option><option>LTR_NET</option><option>MPT1327</option><option>PASSPORT</option><option>NBFM</option><option>AM</option></select></label><label>Playback priority<br><input name="priority" type="number" min="1" max="100" value="100"></label></div><p><label><input name="record" type="checkbox"> Record calls</label></p><fieldset><legend>Send calls to Remote Calls destinations</legend><div id="talkgroupRemoteCalls" class="cards"></div></fieldset><p><button type="submit">Save</button> <button type="button" onclick="talkgroupDialog.close()">Cancel</button> <button id="deleteTalkgroup" type="button">Delete</button> <span id="talkgroupResult" class="muted"></span></p></form></dialog>
+        <dialog id="remoteDialog"><form id="remoteForm"><input name="originalName" type="hidden"><h2>Remote Call API Destination</h2><div class="cards"><label>Name<br><input name="name" required></label><label>POST URL<br><input name="url" type="url" required></label><label>API key environment variable<br><input name="apiKeyEnvironmentVariable" value="SDRTRUNK_REMOTE_API_KEY"></label><label>Authentication header<br><input name="authenticationHeader" value="Authorization"></label><label>Authentication prefix<br><input name="authenticationPrefix" value="Bearer "></label><label>Retries<br><input name="maximumRetries" type="number" min="0" value="5"></label><label>Concurrent uploads<br><input name="maximumConcurrentUploads" type="number" min="1" value="2"></label><label>Timeout seconds<br><input name="requestTimeoutSeconds" type="number" min="1" value="60"></label><label>Maximum call age seconds<br><input name="maximumRecordingAgeSeconds" type="number" min="1" value="600"></label><label>OpenAI key environment variable<br><input name="openAiKeyEnvironmentVariable" value="OPENAI_API_KEY"></label><label>Local Whisper executable<br><input name="localWhisperExecutable"></label><label>Local Whisper model<br><input name="localWhisperModel"></label></div><p><label><input name="enabled" type="checkbox" checked> Enabled</label> <label><input name="openAiEnabled" type="checkbox"> OpenAI Whisper</label> <label><input name="translateToEnglish" type="checkbox"> Translate to English</label></p><button type="submit">Save</button> <button type="button" onclick="remoteDialog.close()">Cancel</button> <button id="deleteRemote" type="button">Delete</button> <span id="remoteResult" class="muted"></span></form></dialog>
         </main><script>
         const esc=s=>String(s??'').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]));
         const mhz=n=>n?`${(n/1e6).toFixed(5)} MHz`:'—'; const mb=n=>n?`${(n/1048576).toFixed(1)} MB`:'—';
@@ -689,9 +835,15 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         function openChannelEditor(id){const x=channelCache.find(c=>c.id===id)||{};channelForm.reset();for(const k of ['id','name','system','site','frequency','decoder','aliasList'])if(x[k]!=null)channelForm.elements[k].value=x[k];channelForm.elements.autoStart.checked=!!x.autoStart;deleteChannel.style.display=id==null?'none':'inline-block';channelResult.textContent='';channelDialog.showModal()}
         channelForm.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(channelForm),body=Object.fromEntries(f);body.action=body.id?'update':'create';if(body.id)body.id=Number(body.id);body.frequency=Number(body.frequency||0);body.autoStart=f.has('autoStart');const r=await fetch('/api/v1/channels',{method:'POST',headers:apiHeaders(true),body:JSON.stringify(body)});channelResult.textContent=r.ok?'Saved':(await r.json()).error;if(r.ok){channelDialog.close();refresh()}});
         deleteChannel.addEventListener('click',async()=>{if(!confirm('Delete this channel?'))return;const r=await fetch('/api/v1/channels',{method:'POST',headers:apiHeaders(true),body:JSON.stringify({action:'delete',id:Number(channelForm.elements.id.value)})});if(r.ok){channelDialog.close();refresh()}else channelResult.textContent=(await r.json()).error});
-        remoteForm.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(remoteForm),body=Object.fromEntries(f);body.openAiEnabled=f.has('openAiEnabled');body.translateToEnglish=f.has('translateToEnglish');const r=await fetch('/api/v1/remote-destinations',{method:'POST',headers:apiHeaders(true),body:JSON.stringify(body)});const j=await r.json();remoteResult.textContent=r.ok?'Destination added':j.error;refresh()});
-        async function refresh(){try{const [s,t,c,b,r,a,l]=await Promise.all(['status','tuners','channels','broadcasters','recordings','activity','live-status'].map(x=>fetch('/api/v1/'+x,{headers:apiHeaders(false)}).then(r=>{if(!r.ok)throw Error(r.status===401?'Access token required':'HTTP '+r.status);return r.json()})));cpu.textContent=s.cpuAvailable?(s.cpu<.005?'<1%':(s.cpu*100).toFixed(1)+'%'):'Unavailable';memory.textContent=mb(s.memoryUsed)+' / '+mb(s.memoryMaximum);tunerCount.textContent=t.length;activeCount.textContent=c.filter(x=>x.processing).length;
+        let talkgroupCache=[],remoteCache=[];
+        function openTalkgroupEditor(id,aliasList){const x=talkgroupCache.find(t=>t.id===id)||{aliasList:aliasList||'',priority:100,protocol:'APCO25',remoteCalls:[]};talkgroupForm.reset();for(const k of ['id','aliasList','talkgroup','name','group','protocol','priority'])if(x[k]!=null)talkgroupForm.elements[k].value=x[k];talkgroupForm.elements.record.checked=!!x.record;talkgroupRemoteCalls.innerHTML=remoteCache.map(d=>`<label><input type="checkbox" name="remoteCalls" value="${esc(d.name)}" ${(x.remoteCalls||[]).includes(d.name)?'checked':''}> ${esc(d.name)}</label>`).join('')||'<span class="muted">Add a Remote Calls destination below first.</span>';deleteTalkgroup.style.display=id==null?'none':'inline-block';talkgroupResult.textContent='';talkgroupDialog.showModal()}
+        talkgroupForm.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(talkgroupForm),body=Object.fromEntries(f);body.action=body.id?'update':'create';if(body.id)body.id=Number(body.id);body.talkgroup=Number(body.talkgroup);body.priority=Number(body.priority||100);body.record=f.has('record');body.remoteCalls=f.getAll('remoteCalls');const r=await fetch('/api/v1/talkgroups',{method:'POST',headers:apiHeaders(true),body:JSON.stringify(body)});const j=await r.json();talkgroupResult.textContent=r.ok?'Saved':j.error;if(r.ok){talkgroupDialog.close();refresh()}});
+        deleteTalkgroup.addEventListener('click',async()=>{if(!confirm('Delete this talkgroup alias?'))return;const r=await fetch('/api/v1/talkgroups',{method:'POST',headers:apiHeaders(true),body:JSON.stringify({action:'delete',id:Number(talkgroupForm.elements.id.value)})});if(r.ok){talkgroupDialog.close();refresh()}else talkgroupResult.textContent=(await r.json()).error});
+        function openRemoteEditor(name){const x=remoteCache.find(d=>d.name===name)||{enabled:true,maximumRetries:5,maximumConcurrentUploads:2,requestTimeoutSeconds:60,maximumRecordingAgeSeconds:600,apiKeyEnvironmentVariable:'SDRTRUNK_REMOTE_API_KEY',authenticationHeader:'Authorization',authenticationPrefix:'Bearer ',openAiKeyEnvironmentVariable:'OPENAI_API_KEY'};remoteForm.reset();for(const k of ['originalName','name','url','apiKeyEnvironmentVariable','authenticationHeader','authenticationPrefix','maximumRetries','maximumConcurrentUploads','requestTimeoutSeconds','maximumRecordingAgeSeconds','openAiKeyEnvironmentVariable','localWhisperExecutable','localWhisperModel'])remoteForm.elements[k].value=k==='originalName'?(name||''):(x[k]??'');for(const k of ['enabled','openAiEnabled','translateToEnglish'])remoteForm.elements[k].checked=!!x[k];deleteRemote.style.display=name?'inline-block':'none';remoteResult.textContent='';remoteDialog.showModal()}
+        remoteForm.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(remoteForm),body=Object.fromEntries(f);body.action=body.originalName?'update':'create';for(const k of ['enabled','openAiEnabled','translateToEnglish'])body[k]=f.has(k);for(const k of ['maximumRetries','maximumConcurrentUploads','requestTimeoutSeconds','maximumRecordingAgeSeconds'])body[k]=Number(body[k]);const r=await fetch('/api/v1/remote-destinations',{method:'POST',headers:apiHeaders(true),body:JSON.stringify(body)});const j=await r.json();remoteResult.textContent=r.ok?'Saved':j.error;if(r.ok){remoteDialog.close();refresh()}});
+        deleteRemote.addEventListener('click',async()=>{if(!confirm('Delete this Remote Calls destination?'))return;const name=remoteForm.elements.originalName.value,r=await fetch('/api/v1/remote-destinations',{method:'POST',headers:apiHeaders(true),body:JSON.stringify({action:'delete',originalName:name})});if(r.ok){remoteDialog.close();refresh()}else remoteResult.textContent=(await r.json()).error});
+        async function refresh(){try{const [s,t,c,b,r,a,l,tg,rd]=await Promise.all(['status','tuners','channels','broadcasters','recordings','activity','live-status','talkgroups','remote-destinations'].map(x=>fetch('/api/v1/'+x,{headers:apiHeaders(false)}).then(r=>{if(!r.ok)throw Error(r.status===401?'Access token required':'HTTP '+r.status);return r.json()})));cpu.textContent=s.cpuAvailable?(s.cpu<.005?'<1%':(s.cpu*100).toFixed(1)+'%'):'Unavailable';memory.textContent=mb(s.memoryUsed)+' / '+mb(s.memoryMaximum);tunerCount.textContent=t.length;activeCount.textContent=c.filter(x=>x.processing).length;
         const current=a.length&&Date.now()-a[0].time<5000?a[0]:null;scanState.textContent=current?'RECEIVING':'SCANNING';scanState.className='scan-state'+(current?' receiving':'');if(current){activeTalkgroup.textContent=current.talkgroup;activeAlias.textContent=current.alias||'Unidentified';activeFrequency.textContent=mhz(current.frequency);activeSource.textContent=current.source||'—'}else if(l&&l.sequence){showLive(l)}
-        channelCache=c.filter(x=>x.type==='STANDARD');tuners.innerHTML=t.map(x=>`<tr><td>${esc(x.name||x.id)}</td><td>${esc(x.status)}</td><td>${mhz(x.frequency)}</td></tr>`).join('');streams.innerHTML=b.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.type)}</td><td>${esc(x.state)}</td><td>${x.queue}</td></tr>`).join('');channels.innerHTML=c.map(x=>`<tr><td>${esc(x.system)}</td><td>${esc(x.site)}</td><td>${esc(x.name)}</td><td>${esc(x.decoder)}</td><td>${x.processing?'Active':'Stopped'}</td><td><button onclick="control(decodeURIComponent('${encodeURIComponent(x.name)}'),'${x.processing?'stop':'start'}')">${x.processing?'Stop':'Start'}</button> ${x.type==='STANDARD'?`<button onclick="openChannelEditor(${x.id})">Edit</button>`:''}</td></tr>`).join('');recordings.innerHTML=r.map(x=>`<tr><td>${esc(x.name)}</td><td>${new Date(x.modified).toLocaleString()}</td><td>${mb(x.size)}</td><td><button onclick="playRecording(decodeURIComponent('${encodeURIComponent(x.name)}'))">Play</button></td></tr>`).join('');activity.innerHTML=a.slice(0,30).map(x=>`<tr><td>${new Date(x.time).toLocaleTimeString()}</td><td>${esc(x.talkgroup)}</td><td>${esc(x.alias||'Unidentified')}</td><td>${esc(x.source)}</td><td>${esc(x.protocol)}</td><td>${mhz(x.frequency)}</td><td>${esc(x.type)}</td></tr>`).join('');updated.textContent='Updated '+new Date().toLocaleTimeString()}catch(e){updated.textContent=e.message}}refresh();setInterval(refresh,2000);
+        channelCache=c.filter(x=>x.type==='STANDARD');talkgroupCache=tg;remoteCache=rd;tuners.innerHTML=t.map(x=>`<tr><td>${esc(x.name||x.id)}</td><td>${esc(x.status)}</td><td>${mhz(x.frequency)}</td></tr>`).join('');streams.innerHTML=b.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.type)}</td><td>${esc(x.state)}</td><td>${x.queue}</td></tr>`).join('');channels.innerHTML=c.map(x=>`<tr><td>${esc(x.system)}</td><td>${esc(x.site)}</td><td>${esc(x.name)}</td><td>${esc(x.decoder)}</td><td>${x.processing?'Active':'Stopped'}</td><td><button onclick="control(decodeURIComponent('${encodeURIComponent(x.name)}'),'${x.processing?'stop':'start'}')">${x.processing?'Stop':'Start'}</button> ${x.type==='STANDARD'?`<button onclick="openChannelEditor(${x.id})">Edit</button> <button onclick="openTalkgroupEditor(null,decodeURIComponent('${encodeURIComponent(x.aliasList||'')}'))">Add TG</button>`:''}</td></tr>`).join('');talkgroups.innerHTML=tg.map(x=>`<tr><td>${esc(x.aliasList)}</td><td>${x.talkgroup}</td><td>${esc(x.name)}</td><td>${esc(x.group)}</td><td>${esc(x.protocol)}</td><td>${x.record?'Yes':'No'}</td><td>${esc((x.remoteCalls||[]).join(', '))}</td><td><button onclick="openTalkgroupEditor(${x.id})">Edit</button></td></tr>`).join('');remoteDestinations.innerHTML=rd.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.url)}</td><td>${x.enabled?'Enabled':'Disabled'}</td><td>${x.openAiEnabled?(x.translateToEnglish?'Translate':'Transcribe'):(x.localWhisperExecutable?'Local Whisper':'Off')}</td><td><button onclick="openRemoteEditor(decodeURIComponent('${encodeURIComponent(x.name)}'))">Edit</button></td></tr>`).join('');recordings.innerHTML=r.map(x=>`<tr><td>${esc(x.name)}</td><td>${new Date(x.modified).toLocaleString()}</td><td>${mb(x.size)}</td><td><button onclick="playRecording(decodeURIComponent('${encodeURIComponent(x.name)}'))">Play</button></td></tr>`).join('');activity.innerHTML=a.slice(0,30).map(x=>`<tr><td>${new Date(x.time).toLocaleTimeString()}</td><td>${esc(x.talkgroup)}</td><td>${esc(x.alias||'Unidentified')}</td><td>${esc(x.source)}</td><td>${esc(x.protocol)}</td><td>${mhz(x.frequency)}</td><td>${esc(x.type)}</td></tr>`).join('');updated.textContent='Updated '+new Date().toLocaleTimeString()}catch(e){updated.textContent=e.message}}refresh();setInterval(refresh,2000);
         </script></body></html>""";
 }
