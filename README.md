@@ -17,9 +17,9 @@ The Raspberry Pi archive contains its own ARM64 Java and JavaFX runtime. A separ
 ### Scanner-style web console
 
 - Runs alongside both the desktop and headless application.
-- Shows scanning/receiving state, active talkgroup, source radio, protocol, frequency, and recent decoded activity.
+- Shows scanning/receiving state, talkgroup ID and configured alias/name, source radio, protocol, frequency, and recent decoded activity.
 - Starts and stops configured channels remotely.
-- Plays completed live calls in the browser.
+- Plays completed live calls in the top scanner panel with call metadata and a measured audio-level meter.
 - Lists and plays MP3/WAV recordings from the configured recording directory.
 - Shows tuner, channel, CPU, memory, and streaming-destination status.
 - Uses bearer-token authentication for non-local API requests.
@@ -85,6 +85,7 @@ Environment variables override saved GUI token settings. Do not commit real keys
 - Added the scanner-style receiving display and decoded activity history.
 - Added core browser channel creation, editing, protocol/frequency changes, auto-start, start/stop, and deletion.
 - Consolidated installation, security, feature, limitation, and release-history documentation.
+- Expanded Live Traffic with talkgroup aliases, per-call metadata, audio dBFS level, and corrected headless CPU/memory reporting.
 
 ### 0.6.2-beta-3
 
