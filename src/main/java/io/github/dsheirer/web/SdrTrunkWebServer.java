@@ -39,16 +39,22 @@ public class SdrTrunkWebServer
     private final PlaylistManager mPlaylistManager;
     private final TunerManager mTunerManager;
     private final ResourceMonitor mResourceMonitor;
-    private final String mToken;
+    private volatile String mToken;
     private HttpServer mServer;
 
     public SdrTrunkWebServer(PlaylistManager playlistManager, TunerManager tunerManager,
-                             ResourceMonitor resourceMonitor)
+                             ResourceMonitor resourceMonitor, String token)
     {
         mPlaylistManager = playlistManager;
         mTunerManager = tunerManager;
         mResourceMonitor = resourceMonitor;
-        mToken = System.getenv("SDRTRUNK_WEB_TOKEN");
+        mToken = token;
+    }
+
+    /** Updates the bearer token without restarting the receiver or web server. */
+    public void setToken(String token)
+    {
+        mToken = token;
     }
 
     public void start() throws IOException

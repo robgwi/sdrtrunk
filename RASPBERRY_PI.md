@@ -21,6 +21,11 @@ export SDRTRUNK_WEB_TOKEN='replace-with-a-long-random-token'
 bin/sdr-trunk
 ```
 
+`SDRTRUNK_WEB_TOKEN` is optional.  On the first desktop/VNC launch, sdrtrunk prompts you to create a token and saves
+it.  On the first headless launch, it creates and saves a random token and prints that token once in the startup log.
+The saved token can be replaced while the desktop application is running from **View > Web Access Token**.  An
+`SDRTRUNK_WEB_TOKEN` environment variable overrides the saved GUI setting.
+
 When launched from a terminal in the Raspberry Pi desktop or VNC session, the Java desktop interface opens and the
 web interface runs at the same time.  When no graphical display is available, start it explicitly in headless mode:
 
