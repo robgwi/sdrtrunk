@@ -4,9 +4,9 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.6.2-beta-7
+## Current release: 0.6.2-beta-8
 
-- [Download Raspberry Pi ARM64 beta 7](https://github.com/robgwi/sdrtrunk/releases/tag/raspberry-pi-v0.6.2-beta-7)
+- [Download Raspberry Pi ARM64 beta 8](https://github.com/robgwi/sdrtrunk/releases/tag/raspberry-pi-v0.6.2-beta-8)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Upstream sdrtrunk wiki](https://github.com/DSheirer/sdrtrunk/wiki)
 
@@ -28,7 +28,7 @@ Signal strength is displayed as unavailable when a tuner does not expose calibra
 
 ### Web playlist management
 
-The beta-7 web channel and talkgroup editor can:
+The beta-8 web channel and talkgroup editor can:
 
 - Create and delete channels.
 - Edit channel name, system, site, alias-list assignment, frequency, protocol, and auto-start.
@@ -65,8 +65,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.6.2-beta-7.zip
-cd sdr-trunk-linux-aarch64-v0.6.2-beta-7
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.6.2-beta-8.zip
+cd sdr-trunk-linux-aarch64-v0.6.2-beta-8
 bin/sdr-trunk
 ```
 
@@ -84,6 +84,13 @@ bin/sdr-trunk
 Environment variables override saved GUI token settings. Do not commit real keys or tokens to this repository.
 
 ## Release history
+
+### 0.6.2-beta-8
+
+- Fixed web API exceptions closing connections and appearing only as **Failed to fetch**.
+- Isolated dashboard data requests so one failed panel no longer prevents the rest of the console from updating.
+- Added endpoint-specific error details to the dashboard and application log.
+- Snapshot live channel, tuner, broadcaster, destination, and alias collections during web requests to prevent concurrent-update failures.
 
 ### 0.6.2-beta-7
 
