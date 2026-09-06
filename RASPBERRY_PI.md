@@ -12,11 +12,11 @@ sudo apt install libusb-1.0-0
 
 ## Install and run
 
-Copy `sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-5.zip` to the Pi, then run:
+Copy `sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-6.zip` to the Pi, then run:
 
 ```bash
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-5.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-5
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-6.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-6
 export SDRTRUNK_WEB_TOKEN='replace-with-a-long-random-token'
 bin/sdr-trunk
 ```
@@ -46,6 +46,9 @@ credentials and preview/import talkgroups by RadioReference system ID. Desktop l
 Whisper is separate from the Java package. Install ffmpeg, Python, and Rob's Whisper fork on the Pi, preferably in a
 virtual environment, then point **Settings > Whisper executable** in the web console at that environment's `whisper`
 command. The first use downloads the selected model weights.
+
+See the [complete local Whisper setup and troubleshooting guide](WHISPER_SETUP.md) for recommended models, service-user
+permissions, and how sdrtrunk passes calls to the background process.
 
 ```bash
 sudo apt install ffmpeg python3-venv

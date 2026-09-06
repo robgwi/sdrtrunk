@@ -4,10 +4,11 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.7.0-beta-5
+## Current release: 0.7.0-beta-6
 
-- [Download Raspberry Pi ARM64 0.7 beta 5](https://github.com/robgwi/sdrtrunk/releases/tag/raspberry-pi-v0.7.0-beta-5)
+- [Download Raspberry Pi ARM64 0.7 beta 6](https://github.com/robgwi/sdrtrunk/releases/tag/raspberry-pi-v0.7.0-beta-6)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
+- [Local Whisper setup guide](WHISPER_SETUP.md)
 - [Upstream sdrtrunk wiki](https://github.com/DSheirer/sdrtrunk/wiki)
 
 The Raspberry Pi archive contains its own ARM64 Java and JavaFX runtime. A separate Java installation is not needed. It supports the Java desktop plus web console when launched from Raspberry Pi Desktop or VNC, and headless receiver plus web console when launched without a display or with `-Djava.awt.headless=true`.
@@ -67,9 +68,10 @@ Advanced protocol-specific decoder fields, site/channel creation, conventional a
 - Runs the [robgwi Whisper fork](https://github.com/robgwi/whisper) as a separate background process, so SDR decoding remains in Java and does not wait for transcription.
 - Configures the executable, model, language, transcribe/translate task, timeout, scanner vocabulary prompt, numeric cleanup, and optional PII redaction from the web console.
 - Recognizes scanner phonetic-alphabet runs, compacts spoken digits and license plates, and shows completed transcripts with their talkgroup and alias.
+- Shows the matching call's pending/completed transcription directly below the live scanner display.
 - Pins locations found from transcript text on an OpenStreetMap preview using Nominatim geocoding.
 
-Whisper, PyTorch, ffmpeg, and model weights are intentionally not bundled in the Java archive. On a Raspberry Pi, start with `tiny.en` or `base.en`; larger models may be too slow or memory-intensive.
+Whisper, PyTorch, ffmpeg, and model weights are intentionally not bundled in the Java archive. Follow the [local Whisper setup guide](WHISPER_SETUP.md). On a Raspberry Pi, start with `tiny.en` or `base.en`; larger models may be too slow or memory-intensive.
 
 ## Raspberry Pi quick start
 
@@ -79,8 +81,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-5.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-5
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-6.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-6
 bin/sdr-trunk
 ```
 
@@ -98,6 +100,14 @@ bin/sdr-trunk
 Environment variables override saved GUI token settings. Do not commit real keys or tokens to this repository.
 
 ## Release history
+
+### 0.7.0-beta-6
+
+- Added a live-call transcription panel directly below the main scanner display.
+- Matched dashboard transcripts to the live audio sequence so one call's text is not shown for a different call.
+- Shows pending, ready, disabled, and authentication/error states in the dashboard transcription panel.
+- Added a complete Raspberry Pi local Whisper installation, configuration, service-account, model-selection, privacy, and troubleshooting guide.
+- Linked the guide from the repository README and the web Whisper Settings window.
 
 ### 0.7.0-beta-5
 
