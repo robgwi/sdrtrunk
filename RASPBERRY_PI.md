@@ -12,11 +12,11 @@ sudo apt install libusb-1.0-0
 
 ## Install and run
 
-Copy `sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-3.zip` to the Pi, then run:
+Copy `sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-4.zip` to the Pi, then run:
 
 ```bash
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-3.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-3
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-4.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-4
 export SDRTRUNK_WEB_TOKEN='replace-with-a-long-random-token'
 bin/sdr-trunk
 ```
@@ -34,7 +34,9 @@ the same web access token as the rest of the remote API.
 
 The main page is a dedicated scanner-style display. When no call is active, its previous talkgroup, alias, frequency,
 source, signal, and level are cleared. System status, Playlist, RadioReference, Recordings, Transcripts, Remote Calls,
-and Settings open in modal windows from the top menu. Signal strength is shown as unavailable during an active call
+and Settings open in modal windows from the top menu. The RadioReference modal supports Premium login, saved-location
+restoration, Country/State/County/System browsing, selective talkgroup import, alias-list creation, and encrypted
+talkgroup muting. Signal strength is shown as unavailable during an active call
 when the selected tuner does not expose calibrated RSSI through sdrtrunk's common tuner interface. The web channel editor supports creating,
 editing, starting/stopping, and deleting playlist channels. The top-menu RadioReference page can test Premium account
 credentials and preview/import talkgroups by RadioReference system ID. Desktop location browsing remains available.

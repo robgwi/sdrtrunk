@@ -18,6 +18,7 @@ import io.github.dsheirer.audio.convert.MP3AudioConverter;
 import io.github.dsheirer.audio.convert.MP3Setting;
 import io.github.dsheirer.gui.SDRTrunk;
 import io.github.dsheirer.gui.playlist.radioreference.RadioReferenceDecoder;
+import io.github.dsheirer.gui.playlist.radioreference.TalkgroupEncryption;
 import io.github.dsheirer.preference.UserPreferences;
 import io.github.dsheirer.sample.Listener;
 import io.github.dsheirer.module.decode.event.IDecodeEvent;
@@ -28,6 +29,7 @@ import io.github.dsheirer.identifier.Form;
 import io.github.dsheirer.identifier.configuration.ConfigurationLongIdentifier;
 import io.github.dsheirer.alias.Alias;
 import io.github.dsheirer.alias.AliasList;
+import io.github.dsheirer.alias.AliasModel;
 import io.github.dsheirer.alias.id.AliasID;
 import io.github.dsheirer.alias.id.broadcast.BroadcastChannel;
 import io.github.dsheirer.alias.id.talkgroup.Talkgroup;
@@ -56,8 +58,10 @@ import java.io.ByteArrayOutputStream;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.ConcurrentLinkedDeque;
@@ -79,6 +83,7 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
     private final ResourceMonitor mResourceMonitor;
     private final UserPreferences mUserPreferences;
     private final WebTranscriptionService mTranscriptionService = new WebTranscriptionService();
+    private volatile boolean mRadioReferenceInitialized;
     private volatile String mToken;
     private volatile Map<String,Object> mLatestAudioMetadata = Map.of();
     private final AtomicLong mLatestAudioSequence = new AtomicLong();
@@ -801,11 +806,22 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
     private void radioReference(HttpExchange exchange) throws IOException
     {
         RadioReference radioReference = mPlaylistManager.getRadioReference();
+        initializeRadioReference(radioReference);
         if("GET".equals(exchange.getRequestMethod()))
         {
-            json(exchange, 200, Map.of("configured", mUserPreferences.getRadioReferencePreference().hasStoredCredentials(),
-                "userName", String.valueOf(mUserPreferences.getRadioReferencePreference().getUserName()),
-                "status", radioReference.getLoginStatus().name(), "premium", radioReference.premiumAccountProperty().get()));
+            Map<String,Object> status = new LinkedHashMap<>();
+            String username = mUserPreferences.getRadioReferencePreference().getUserName();
+            status.put("configured", mUserPreferences.getRadioReferencePreference().hasStoredCredentials());
+            status.put("userName", username != null ? username : "");
+            status.put("storeCredentials", mUserPreferences.getRadioReferencePreference().isStoreCredentials());
+            status.put("status", radioReference.getLoginStatus().name());
+            status.put("premium", radioReference.premiumAccountProperty().get());
+            status.put("expires", valueOrEmpty(radioReference.accountExpiresProperty().get()));
+            status.put("aliasLists", radioReferenceAliasLists());
+            status.put("preferredCountryId", mUserPreferences.getRadioReferencePreference().getPreferredCountryId());
+            status.put("preferredStateId", mUserPreferences.getRadioReferencePreference().getPreferredStateId());
+            status.put("preferredCountyId", mUserPreferences.getRadioReferencePreference().getPreferredCountyId());
+            json(exchange, 200, status);
             return;
         }
         if(!"POST".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
@@ -818,29 +834,100 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
             {
                 String username = requiredString(request, "username");
                 String password = requiredString(request, "password");
-                RadioReference.LoginStatus status = RadioReference.testConnectionWithExp(username, password);
-                if(status == RadioReference.LoginStatus.VALID_PREMIUM)
+                boolean store = booleanValue(request, "store", true);
+                try
                 {
-                    mUserPreferences.getRadioReferencePreference().setStoreCredentials(true);
-                    mUserPreferences.getRadioReferencePreference().setUserName(username);
-                    mUserPreferences.getRadioReferencePreference().setPassword(password);
-                    radioReference.setAuthorizationInformation(new io.github.dsheirer.rrapi.type.AuthorizationInformation(
-                        RadioReference.SDRTRUNK_APP_KEY, username, password));
+                    RadioReference.LoginStatus status = RadioReference.testConnectionWithExp(username, password);
+                    if(status == RadioReference.LoginStatus.VALID_PREMIUM)
+                    {
+                        if(store)
+                        {
+                            mUserPreferences.getRadioReferencePreference().setUserName(username);
+                            mUserPreferences.getRadioReferencePreference().setPassword(password);
+                            mUserPreferences.getRadioReferencePreference().setStoreCredentials(true);
+                        }
+                        else { mUserPreferences.getRadioReferencePreference().removeStoredCredentials(); }
+                        radioReference.setAuthorizationInformation(RadioReference.getAuthorizatonInformation(username, password));
+                        mRadioReferenceInitialized = true;
+                    }
+                    String message = switch(status)
+                    {
+                        case VALID_PREMIUM -> "Signed in with RadioReference Premium access";
+                        case EXPIRED_PREMIUM -> "The RadioReference Premium subscription is expired";
+                        case INVALID_LOGIN -> "RadioReference rejected the username or password";
+                        default -> "RadioReference login status is unknown";
+                    };
+                    json(exchange, 200, Map.of("success", status == RadioReference.LoginStatus.VALID_PREMIUM,
+                        "status", status.name(), "message", message));
                 }
-                json(exchange, 200, Map.of("status", status.name()));
+                catch(Exception e)
+                {
+                    json(exchange, 200, Map.of("success", false, "status", "UNAVAILABLE",
+                        "message", radioReferenceError(e)));
+                }
+                return;
+            }
+            var service = radioReference.getService();
+            if("countries".equals(action))
+            {
+                List<Map<String,Object>> countries = new ArrayList<>();
+                for(var country: service.getCountries())
+                {
+                    countries.add(Map.of("id", country.getCountryId(), "name", valueOrEmpty(country.getName()),
+                        "code", valueOrEmpty(country.getCountryCode())));
+                }
+                json(exchange, 200, Map.of("countries", countries));
+                return;
+            }
+            if("country".equals(action))
+            {
+                int countryId = integerValue(request, "countryId", -1);
+                var info = service.getCountryInfo(countryId);
+                mUserPreferences.getRadioReferencePreference().setPreferredCountryId(countryId);
+                List<Map<String,Object>> states = new ArrayList<>();
+                if(info.getStates() != null)
+                {
+                    for(var state: info.getStates())
+                    { states.add(Map.of("id", state.getStateId(), "name", valueOrEmpty(state.getName()), "code", valueOrEmpty(state.getStateCode()))); }
+                }
+                json(exchange, 200, Map.of("name", valueOrEmpty(info.getName()), "states", states));
+                return;
+            }
+            if("state".equals(action))
+            {
+                int stateId = integerValue(request, "stateId", -1);
+                var info = service.getStateInfo(stateId);
+                mUserPreferences.getRadioReferencePreference().setPreferredStateId(stateId);
+                List<Map<String,Object>> counties = new ArrayList<>();
+                if(info.getCounties() != null)
+                {
+                    for(var county: info.getCounties())
+                    { counties.add(Map.of("id", county.getCountyId(), "name", valueOrEmpty(county.getName()))); }
+                }
+                json(exchange, 200, Map.of("name", valueOrEmpty(info.getName()), "counties", counties,
+                    "systems", radioReferenceSystems(info.getSystems())));
+                return;
+            }
+            if("county".equals(action))
+            {
+                int countyId = integerValue(request, "countyId", -1);
+                var info = service.getCountyInfo(countyId);
+                mUserPreferences.getRadioReferencePreference().setPreferredCountyId(countyId);
+                json(exchange, 200, Map.of("name", valueOrEmpty(info.getName()),
+                    "systems", radioReferenceSystems(info.getSystems())));
+                return;
+            }
+            if("createAliasList".equals(action))
+            {
+                String name = requiredString(request, "name").trim();
+                if(name.length() > 25) { throw new IllegalArgumentException("Alias list names are limited to 25 characters"); }
+                mPlaylistManager.getAliasModel().addAliasList(name);
+                mPlaylistManager.schedulePlaylistSave();
+                json(exchange, 200, Map.of("aliasLists", radioReferenceAliasLists(), "selected", name));
                 return;
             }
             int systemId = integerValue(request, "systemId", -1);
-            var service = radioReference.getService();
-            io.github.dsheirer.rrapi.type.SystemInformation information = service.getSystemInformation(systemId);
-            io.github.dsheirer.rrapi.type.System system = new io.github.dsheirer.rrapi.type.System();
-            system.setSystemId(systemId);
-            system.setName(information.getName());
-            system.setTypeId(information.getTypeId());
-            system.setFlavorId(information.getFlavorId());
-            system.setVoiceId(information.getVoiceId());
-            system.setCity(information.getCity());
-            system.setLastUpdated(information.getLastUpdated());
+            io.github.dsheirer.rrapi.type.System system = radioReferenceSystem(service, systemId);
             List<io.github.dsheirer.rrapi.type.Talkgroup> groups = service.getTalkgroups(systemId);
             List<TalkgroupCategory> categories = service.getTalkgroupCategories(systemId);
             Map<Integer,String> categoryNames = new LinkedHashMap<>();
@@ -849,46 +936,134 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
                 service.getFlavorsMap(), service.getVoicesMap(), service.getTagsMap());
             if("preview".equals(action))
             {
+                String aliasListName = request.has("aliasList") ? request.get("aliasList").getAsString() : "";
                 List<Map<String,Object>> result = new ArrayList<>();
                 for(var group: groups)
                 {
-                    result.add(Map.of("id", group.getTalkgroupId(), "value", decoder.getTalkgroupValue(group, system),
-                        "name", String.valueOf(group.getAlphaTag()), "description", String.valueOf(group.getDescription()),
-                        "category", categoryNames.getOrDefault(group.getTalkgroupCategoryId(), ""),
-                        "protocol", decoder.getProtocol(system).name()));
+                    Talkgroup aliasId = decoder.getTalkgroupAliasId(group, system);
+                    Map<String,Object> item = new LinkedHashMap<>();
+                    item.put("id", group.getTalkgroupId());
+                    item.put("value", decoder.getTalkgroupValue(group, system));
+                    item.put("name", valueOrEmpty(group.getAlphaTag()));
+                    item.put("description", valueOrEmpty(group.getDescription()));
+                    item.put("categoryId", group.getTalkgroupCategoryId());
+                    item.put("category", categoryNames.getOrDefault(group.getTalkgroupCategoryId(), ""));
+                    item.put("protocol", decoder.getProtocol(system).name());
+                    item.put("mode", valueOrEmpty(group.getMode()));
+                    item.put("encryption", TalkgroupEncryption.lookup(group.getEncryptionState()).toString());
+                    item.put("fullyEncrypted", group.isFullyEncrypted());
+                    item.put("imported", !aliasListName.isBlank() && radioReferenceAliasExists(aliasListName, aliasId));
+                    result.add(item);
                 }
-                json(exchange, 200, Map.of("system", system.getName(), "talkgroups", result));
+                List<Map<String,Object>> categoryResult = new ArrayList<>();
+                for(TalkgroupCategory category: categories)
+                { categoryResult.add(Map.of("id", category.getTalkgroupCategoryId(), "name", valueOrEmpty(category.getName()))); }
+                json(exchange, 200, Map.of("system", valueOrEmpty(system.getName()),
+                    "protocol", decoder.getProtocol(system).name(), "supported", decoder.hasSupportedProtocol(system),
+                    "categories", categoryResult, "talkgroups", result));
                 return;
             }
             if("import".equals(action))
             {
                 String aliasListName = requiredString(request, "aliasList");
                 AliasList aliasList = mPlaylistManager.getAliasModel().getAliasList(aliasListName);
+                if(aliasList == null) { throw new IllegalArgumentException("Select or create an alias list before importing"); }
+                Set<Integer> selected = new HashSet<>();
+                if(request.has("talkgroupIds") && request.get("talkgroupIds").isJsonArray())
+                { request.getAsJsonArray("talkgroupIds").forEach(value -> selected.add(value.getAsInt())); }
+                boolean encryptedMuted = booleanValue(request, "encryptedMuted", false);
                 List<Alias> created = new ArrayList<>();
                 for(var group: groups)
                 {
+                    if(!selected.isEmpty() && !selected.contains(group.getTalkgroupId())) { continue; }
                     Alias alias = decoder.createAlias(group, system, aliasListName,
                         categoryNames.get(group.getTalkgroupCategoryId()));
                     Talkgroup id = alias.getAliasIdentifiers().stream().filter(Talkgroup.class::isInstance)
                         .map(Talkgroup.class::cast).findFirst().orElse(null);
-                    boolean exists = id != null && mPlaylistManager.getAliasModel().getAliases().stream()
-                        .filter(existing -> aliasListName.equals(existing.getAliasListName()))
-                        .flatMap(existing -> existing.getAliasIdentifiers().stream())
-                        .filter(Talkgroup.class::isInstance).map(Talkgroup.class::cast)
-                        .anyMatch(existing -> existing.getProtocol() == id.getProtocol() &&
-                            existing.getValue() == id.getValue());
-                    if(id != null && !exists) { created.add(alias); }
+                    if(id != null && !radioReferenceAliasExists(aliasListName, id))
+                    {
+                        if(encryptedMuted && group.isFullyEncrypted())
+                        {
+                            alias.addAliasID(new io.github.dsheirer.alias.id.priority.Priority(
+                                io.github.dsheirer.alias.id.priority.Priority.DO_NOT_MONITOR));
+                        }
+                        created.add(alias);
+                    }
                 }
                 mPlaylistManager.getAliasModel().addAliases(created);
                 mPlaylistManager.schedulePlaylistSave();
                 json(exchange, 200, Map.of("system", system.getName(), "imported", created.size(),
+                    "selected", selected.isEmpty() ? groups.size() : selected.size(),
                     "available", groups.size(), "aliasList", aliasListName));
                 return;
             }
             json(exchange, 400, Map.of("error", "unsupported RadioReference action"));
         }
-        catch(Exception e) { json(exchange, 400, Map.of("error", e.getMessage() != null ? e.getMessage() : "RadioReference request failed")); }
+        catch(IllegalArgumentException e) { json(exchange, 400, Map.of("error", radioReferenceError(e))); }
+        catch(Exception e) { json(exchange, 502, Map.of("error", radioReferenceError(e))); }
     }
+
+    private synchronized void initializeRadioReference(RadioReference radioReference)
+    {
+        if(mRadioReferenceInitialized) { return; }
+        mRadioReferenceInitialized = true;
+        var credentials = mUserPreferences.getRadioReferencePreference().getAuthorizationInformation();
+        if(credentials != null && credentials.getUserName() != null && credentials.getPassword() != null)
+        { radioReference.setAuthorizationInformation(credentials); }
+    }
+
+    private List<String> radioReferenceAliasLists()
+    {
+        return new ArrayList<>(mPlaylistManager.getAliasModel().aliasListNames()).stream()
+            .filter(name -> name != null && !name.isBlank() && !AliasModel.NO_ALIAS_LIST.equals(name)).sorted().toList();
+    }
+
+    private static List<Map<String,Object>> radioReferenceSystems(List<io.github.dsheirer.rrapi.type.System> systems)
+    {
+        List<Map<String,Object>> result = new ArrayList<>();
+        if(systems != null)
+        {
+            systems.stream().sorted().forEach(system -> result.add(Map.of("id", system.getSystemId(),
+                "name", valueOrEmpty(system.getName()), "city", valueOrEmpty(system.getCity()))));
+        }
+        return result;
+    }
+
+    private static io.github.dsheirer.rrapi.type.System radioReferenceSystem(
+        io.github.dsheirer.rrapi.RadioReferenceService service, int systemId) throws Exception
+    {
+        if(systemId < 1) { throw new IllegalArgumentException("Select a RadioReference system"); }
+        var information = service.getSystemInformation(systemId);
+        var system = new io.github.dsheirer.rrapi.type.System();
+        system.setSystemId(systemId);
+        system.setName(information.getName());
+        system.setTypeId(information.getTypeId());
+        system.setFlavorId(information.getFlavorId());
+        system.setVoiceId(information.getVoiceId());
+        system.setCity(information.getCity());
+        system.setLastUpdated(information.getLastUpdated());
+        return system;
+    }
+
+    private boolean radioReferenceAliasExists(String aliasListName, Talkgroup id)
+    {
+        return mPlaylistManager.getAliasModel().getAliases().stream()
+            .filter(existing -> aliasListName.equals(existing.getAliasListName()))
+            .flatMap(existing -> existing.getAliasIdentifiers().stream())
+            .filter(Talkgroup.class::isInstance).map(Talkgroup.class::cast)
+            .anyMatch(existing -> existing.getProtocol() == id.getProtocol() && existing.getValue() == id.getValue());
+    }
+
+    private static String radioReferenceError(Throwable error)
+    {
+        Throwable cause = error;
+        while(cause.getCause() != null) { cause = cause.getCause(); }
+        String message = error.getMessage();
+        if(message == null || message.isBlank()) { message = cause.getMessage(); }
+        return message != null && !message.isBlank() ? message : "RadioReference request failed";
+    }
+
+    private static String valueOrEmpty(String value) { return value != null ? value : ""; }
 
     private void recordings(HttpExchange exchange) throws IOException
     {
@@ -984,7 +1159,7 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         <section><h2>Talkgroups &amp; Aliases <button onclick="openTalkgroupEditor()">Add Talkgroup</button></h2><p class="muted">Add or edit talkgroups imported from RadioReference. Assigning a Remote Call destination controls which calls are sent there.</p><table><thead><tr><th>Alias List</th><th>Talkgroup</th><th>Name</th><th>Group</th><th>Protocol</th><th>Record</th><th>Remote Calls</th><th></th></tr></thead><tbody id="talkgroups"></tbody></table></section>
         <section><h2>Recorded audio</h2><table><thead><tr><th>File</th><th>Date</th><th>Size</th><th></th></tr></thead><tbody id="recordings"></tbody></table></section>
         <section><h2>Recent scanner activity</h2><table><thead><tr><th>Time</th><th>Talkgroup</th><th>Alias</th><th>Source</th><th>Protocol</th><th>Frequency</th><th>Event</th></tr></thead><tbody id="activity"></tbody></table></section>
-        <section id="radioreference"><h2>RadioReference Talkgroup Import</h2><p class="muted">Uses a premium RadioReference account. Preview a trunked system by its RadioReference System ID, then import new talkgroups into an alias list without duplicating existing IDs.</p><form id="rrCredentialForm" class="cards"><label>Username<br><input name="username" autocomplete="username"></label><label>Password<br><input name="password" type="password" autocomplete="current-password"></label><div><button type="submit">Save &amp; Test Account</button></div></form><p id="radioReferenceStatus" class="muted">Checking account…</p><form id="rrImportForm" class="cards"><label>System ID<br><input name="systemId" type="number" min="1" required></label><label>Import to alias list<br><input name="aliasList" required></label><div><button type="button" id="rrPreview">Preview</button> <button type="submit">Import Talkgroups</button></div></form><p id="rrResult" class="muted"></p><table><thead><tr><th>ID</th><th>Name</th><th>Category</th><th>Description</th></tr></thead><tbody id="rrTalkgroups"></tbody></table></section>
+        <section id="radioreference"><h2>RadioReference Import</h2><p class="muted">Browse RadioReference the same way as the desktop Playlist Editor: sign in, choose a country, state, county, and trunked system, then select talkgroups to import.</p><form id="rrCredentialForm" class="cards"><label>User Name<br><input name="username" autocomplete="username" required></label><label>Password<br><input id="rrPassword" name="password" type="password" autocomplete="current-password" required></label><label><input id="rrShowPassword" type="checkbox"> Show password</label><label><input name="store" type="checkbox" checked> Store Login Credentials</label><div><button type="submit">Sign In &amp; Test Connection</button></div></form><p id="radioReferenceStatus" class="muted">Checking account…</p><div id="rrBrowser" hidden><div class="cards"><label>Country<br><select id="rrCountry"><option value="">Select Country</option></select></label><label>State<br><select id="rrState" disabled><option value="">Select State</option></select></label><label>County<br><select id="rrCounty" disabled><option value="">Select County</option></select></label><label>Trunked System<br><select id="rrSystem" disabled><option value="">Select System</option></select></label></div><hr><div class="cards"><label>Import To Alias List<br><select id="rrAliasList"><option value="">Select Alias List</option></select></label><label>New Alias List<br><span><input id="rrNewAliasList" maxlength="25"> <button id="rrCreateAliasList" type="button">Create</button></span></label><label>Search<br><input id="rrSearch" type="search" placeholder="Talkgroup, description, or ID"></label><label>Category<br><select id="rrCategory"><option value="">All Talkgroups</option></select></label></div><p><label><input id="rrEncryptedMuted" type="checkbox"> Set fully encrypted talkgroups to Do Not Monitor</label></p><p><button id="rrSelectAll" type="button">Select All Visible</button> <button id="rrClearAll" type="button">Clear Selection</button> <button id="rrImport" type="button">Import Selected Talkgroups</button> <span id="rrSelection" class="muted"></span></p><p id="rrResult" class="muted"></p><div style="overflow:auto"><table><thead><tr><th></th><th>Talkgroup</th><th>Alpha Tag</th><th>Description</th><th>Category</th><th>Mode</th><th>Encryption</th><th>Alias Status</th></tr></thead><tbody id="rrTalkgroups"></tbody></table></div></div></section>
         <section id="transcriptsSection"><h2>Scanner Transcripts</h2><p class="muted">Completed calls are transcribed in the background. Pin an address or transcript to preview it with OpenStreetMap.</p><table><thead><tr><th>Time</th><th>Talkgroup</th><th>Alias</th><th>Transcript</th><th></th></tr></thead><tbody id="transcripts"></tbody></table><iframe id="mapFrame" title="Transcript location map"></iframe></section>
         <section id="remoteCalls"><h2>Remote Calls <button onclick="openRemoteEditor()">Add Destination</button></h2><table><thead><tr><th>Name</th><th>POST URL</th><th>Status</th><th>Transcription</th><th></th></tr></thead><tbody id="remoteDestinations"></tbody></table></section>
         <section id="whisperSettings"><h2>Whisper Settings</h2><form id="whisperForm"><div class="cards"><label>Whisper executable<br><input name="executable" placeholder="whisper"></label><label>Model<br><input name="model" placeholder="base.en"></label><label>Language<br><input name="language" value="English"></label><label>Task<br><select name="task"><option>transcribe</option><option>translate</option></select></label><label>Timeout seconds<br><input name="timeoutSeconds" type="number" min="10" value="180"></label><label>Map city / region<br><input name="city"></label></div><p><label><input name="enabled" type="checkbox"> Enable background transcription</label> <label><input name="normalize" type="checkbox"> Normalize scanner numbers</label> <label><input name="redact" type="checkbox"> Redact PII</label></p><label>Scanner vocabulary prompt<br><textarea name="prompt" rows="5"></textarea></label><p><button type="submit">Save Whisper Settings</button> <span id="whisperResult" class="muted"></span></p><p class="muted">Install source: <a href="https://github.com/robgwi/whisper" target="_blank">robgwi/whisper</a>. Python, PyTorch, ffmpeg, the Whisper package, and model weights are installed separately from the Java application.</p></form></section>
@@ -1022,12 +1197,27 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         function openRemoteEditor(name){const x=remoteCache.find(d=>d.name===name)||{enabled:true,maximumRetries:5,maximumConcurrentUploads:2,requestTimeoutSeconds:60,maximumRecordingAgeSeconds:600,apiKeyEnvironmentVariable:'SDRTRUNK_REMOTE_API_KEY',authenticationHeader:'Authorization',authenticationPrefix:'Bearer ',openAiKeyEnvironmentVariable:'OPENAI_API_KEY'};remoteForm.reset();for(const k of ['originalName','name','url','apiKeyEnvironmentVariable','authenticationHeader','authenticationPrefix','maximumRetries','maximumConcurrentUploads','requestTimeoutSeconds','maximumRecordingAgeSeconds','openAiKeyEnvironmentVariable','localWhisperExecutable','localWhisperModel'])remoteForm.elements[k].value=k==='originalName'?(name||''):(x[k]??'');for(const k of ['enabled','openAiEnabled','translateToEnglish'])remoteForm.elements[k].checked=!!x[k];deleteRemote.style.display=name?'inline-block':'none';remoteResult.textContent='';remoteDialog.showModal()}
         remoteForm.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(remoteForm),body=Object.fromEntries(f);body.action=body.originalName?'update':'create';for(const k of ['enabled','openAiEnabled','translateToEnglish'])body[k]=f.has(k);for(const k of ['maximumRetries','maximumConcurrentUploads','requestTimeoutSeconds','maximumRecordingAgeSeconds'])body[k]=Number(body[k]);const r=await fetch('/api/v1/remote-destinations',{method:'POST',headers:apiHeaders(true),body:JSON.stringify(body)});const j=await r.json();remoteResult.textContent=r.ok?'Saved':j.error;if(r.ok){remoteDialog.close();refresh()}});
         deleteRemote.addEventListener('click',async()=>{if(!confirm('Delete this Remote Calls destination?'))return;const name=remoteForm.elements.originalName.value,r=await fetch('/api/v1/remote-destinations',{method:'POST',headers:apiHeaders(true),body:JSON.stringify({action:'delete',originalName:name})});if(r.ok){remoteDialog.close();refresh()}else remoteResult.textContent=(await r.json()).error});
-        let whisperLoaded=false,transcriptCity='';
         async function rrRequest(body){const r=await fetch('/api/v1/radioreference',{method:'POST',headers:apiHeaders(true),body:JSON.stringify(body)}),j=await r.json();if(!r.ok)throw Error(j.error||r.status);return j}
-        rrCredentialForm.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(rrCredentialForm);try{const j=await rrRequest({action:'credentials',username:f.get('username'),password:f.get('password')});radioReferenceStatus.textContent='Account: '+j.status}catch(e){radioReferenceStatus.textContent=e.message}});
-        rrPreview.addEventListener('click',async()=>{const f=new FormData(rrImportForm);rrResult.textContent='Loading system…';try{const j=await rrRequest({action:'preview',systemId:Number(f.get('systemId'))});rrResult.textContent=j.system+' — '+j.talkgroups.length+' talkgroups';rrTalkgroups.innerHTML=j.talkgroups.map(x=>`<tr><td>${x.value}</td><td>${esc(x.name)}</td><td>${esc(x.category)}</td><td>${esc(x.description)}</td></tr>`).join('')}catch(e){rrResult.textContent=e.message}});
-        rrImportForm.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(rrImportForm);if(!confirm('Import new talkgroups into '+f.get('aliasList')+'?'))return;rrResult.textContent='Importing…';try{const j=await rrRequest({action:'import',systemId:Number(f.get('systemId')),aliasList:f.get('aliasList')});rrResult.textContent=`Imported ${j.imported} of ${j.available} talkgroups into ${j.aliasList}`;refresh()}catch(e){rrResult.textContent=e.message}});
-        fetch('/api/v1/radioreference',{headers:apiHeaders(false)}).then(r=>r.json()).then(j=>radioReferenceStatus.textContent=`Account: ${j.userName||'not configured'} — ${j.status}${j.premium?' (Premium)':''}`).catch(e=>radioReferenceStatus.textContent=e.message);
+        let rrGroups=[],rrStateSystems=[],rrCountySystems=[];
+        function rrOptions(control,items,placeholder,selected){control.innerHTML=`<option value="">${placeholder}</option>`+(items||[]).map(x=>`<option value="${x.id}" ${Number(selected)===Number(x.id)?'selected':''}>${esc(x.name)}${x.city?' — '+esc(x.city):''}</option>`).join('');control.disabled=!(items&&items.length)}
+        function rrAliasOptions(items,selected){rrAliasList.innerHTML='<option value="">Select Alias List</option>'+(items||[]).map(name=>`<option ${name===selected?'selected':''}>${esc(name)}</option>`).join('')}
+        function rrSystems(){const seen=new Set(),combined=[...rrCountySystems,...rrStateSystems].filter(x=>!seen.has(x.id)&&seen.add(x.id));rrOptions(rrSystem,combined,'Select Trunked System',rrSystem.value)}
+        function rrSelectionCount(){const count=rrTalkgroups.querySelectorAll('input[type=checkbox]:checked:not(:disabled)').length;rrSelection.textContent=count+' selected'}
+        function rrRenderTalkgroups(){const search=rrSearch.value.trim().toLowerCase(),category=rrCategory.value;rrTalkgroups.innerHTML=rrGroups.filter(x=>(!category||String(x.categoryId)===category)&&(!search||`${x.value} ${x.name} ${x.description} ${x.category}`.toLowerCase().includes(search))).map(x=>`<tr><td><input type="checkbox" data-id="${x.id}" ${x.imported?'checked disabled':''}></td><td>${x.value}</td><td>${esc(x.name)}</td><td>${esc(x.description)}</td><td>${esc(x.category)}</td><td>${esc(x.mode)}</td><td>${esc(x.encryption)}</td><td>${x.imported?'Already Imported':''}</td></tr>`).join('');rrTalkgroups.querySelectorAll('input').forEach(box=>box.addEventListener('change',rrSelectionCount));rrSelectionCount()}
+        async function rrPreviewSystem(){if(!rrSystem.value){rrGroups=[];rrRenderTalkgroups();return}rrResult.textContent='Loading system talkgroups…';try{const j=await rrRequest({action:'preview',systemId:Number(rrSystem.value),aliasList:rrAliasList.value});rrGroups=j.talkgroups||[];rrCategory.innerHTML='<option value="">All Talkgroups</option>'+(j.categories||[]).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('');rrResult.textContent=`${j.system} — ${j.protocol} — ${rrGroups.length} talkgroups${j.supported?'':' — protocol import is not supported'}`;rrRenderTalkgroups()}catch(e){rrResult.textContent=e.message;rrGroups=[];rrRenderTalkgroups()}}
+        async function rrLoadCounty(id){rrCountySystems=[];rrSystems();if(!id)return;rrResult.textContent='Loading county systems…';try{const j=await rrRequest({action:'county',countyId:Number(id)});rrCountySystems=j.systems||[];rrSystems();rrResult.textContent=`${j.name}: ${rrCountySystems.length} county systems`}catch(e){rrResult.textContent=e.message}}
+        async function rrLoadState(id,preferredCounty){rrStateSystems=[];rrCountySystems=[];rrOptions(rrCounty,[],'Select County');rrSystems();if(!id)return;rrResult.textContent='Loading state…';try{const j=await rrRequest({action:'state',stateId:Number(id)});rrStateSystems=j.systems||[];rrOptions(rrCounty,j.counties,'Select County',preferredCounty);rrSystems();rrResult.textContent=`${j.name}: ${rrStateSystems.length} statewide systems`;if(preferredCounty>0)await rrLoadCounty(preferredCounty)}catch(e){rrResult.textContent=e.message}}
+        async function rrLoadCountry(id,preferredState,preferredCounty){rrOptions(rrState,[],'Select State');rrOptions(rrCounty,[],'Select County');rrStateSystems=[];rrCountySystems=[];rrSystems();if(!id)return;rrResult.textContent='Loading country…';try{const j=await rrRequest({action:'country',countryId:Number(id)});rrOptions(rrState,j.states,'Select State',preferredState);rrResult.textContent=j.name;if(preferredState>0)await rrLoadState(preferredState,preferredCounty)}catch(e){rrResult.textContent=e.message}}
+        async function rrLoadCountries(preferredCountry,preferredState,preferredCounty){rrResult.textContent='Loading countries…';try{const j=await rrRequest({action:'countries'});rrOptions(rrCountry,j.countries,'Select Country',preferredCountry);rrResult.textContent='Select a country';if(preferredCountry>0)await rrLoadCountry(preferredCountry,preferredState,preferredCounty)}catch(e){rrResult.textContent=e.message}}
+        async function rrLoadStatus(){try{const r=await fetch('/api/v1/radioreference',{headers:apiHeaders(false)}),j=await r.json();if(!r.ok)throw Error(j.error||r.status);rrCredentialForm.elements.username.value=j.userName||'';rrCredentialForm.elements.store.checked=j.storeCredentials!==false;rrAliasOptions(j.aliasLists||[],rrAliasList.value);radioReferenceStatus.textContent=j.premium?`Signed in: ${j.userName} — Premium${j.expires?' — expires '+j.expires:''}`:`Account: ${j.userName||'not configured'} — ${j.status}`;rrBrowser.hidden=!j.premium;if(j.premium)await rrLoadCountries(j.preferredCountryId,j.preferredStateId,j.preferredCountyId)}catch(e){radioReferenceStatus.textContent=e.message;rrBrowser.hidden=true}}
+        rrShowPassword.addEventListener('change',()=>rrPassword.type=rrShowPassword.checked?'text':'password');
+        rrCredentialForm.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(rrCredentialForm);radioReferenceStatus.textContent='Testing RadioReference connection…';try{const j=await rrRequest({action:'credentials',username:f.get('username'),password:f.get('password'),store:f.has('store')});radioReferenceStatus.textContent=j.message;if(j.success){rrBrowser.hidden=false;await rrLoadStatus()}else rrBrowser.hidden=true}catch(e){radioReferenceStatus.textContent=e.message;rrBrowser.hidden=true}});
+        rrCountry.addEventListener('change',()=>rrLoadCountry(rrCountry.value));rrState.addEventListener('change',()=>rrLoadState(rrState.value));rrCounty.addEventListener('change',()=>rrLoadCounty(rrCounty.value));rrSystem.addEventListener('change',rrPreviewSystem);rrAliasList.addEventListener('change',()=>{if(rrSystem.value)rrPreviewSystem()});rrSearch.addEventListener('input',rrRenderTalkgroups);rrCategory.addEventListener('change',rrRenderTalkgroups);
+        rrSelectAll.addEventListener('click',()=>{rrTalkgroups.querySelectorAll('input[type=checkbox]:not(:disabled)').forEach(box=>box.checked=true);rrSelectionCount()});rrClearAll.addEventListener('click',()=>{rrTalkgroups.querySelectorAll('input[type=checkbox]:not(:disabled)').forEach(box=>box.checked=false);rrSelectionCount()});
+        rrCreateAliasList.addEventListener('click',async()=>{const name=rrNewAliasList.value.trim();if(!name)return;try{const j=await rrRequest({action:'createAliasList',name});rrAliasOptions(j.aliasLists,j.selected);rrNewAliasList.value='';rrResult.textContent='Created alias list '+j.selected;if(rrSystem.value)rrPreviewSystem()}catch(e){rrResult.textContent=e.message}});
+        rrImport.addEventListener('click',async()=>{const ids=[...rrTalkgroups.querySelectorAll('input[type=checkbox]:checked:not(:disabled)')].map(box=>Number(box.dataset.id));if(!rrAliasList.value){rrResult.textContent='Select or create an alias list first';return}if(!ids.length){rrResult.textContent='Select at least one new talkgroup';return}if(!confirm(`Import ${ids.length} talkgroups into ${rrAliasList.value}?`))return;rrResult.textContent='Importing talkgroups…';try{const j=await rrRequest({action:'import',systemId:Number(rrSystem.value),aliasList:rrAliasList.value,talkgroupIds:ids,encryptedMuted:rrEncryptedMuted.checked});rrResult.textContent=`Imported ${j.imported} of ${j.selected} selected talkgroups into ${j.aliasList}`;await rrPreviewSystem();refresh()}catch(e){rrResult.textContent=e.message}});
+        rrLoadStatus();
+        let whisperLoaded=false,transcriptCity='';
         async function refreshTranscripts(){try{const items=await fetch('/api/v1/transcripts',{headers:apiHeaders(false)}).then(r=>r.json()),settings=await fetch('/api/v1/whisper-settings',{headers:apiHeaders(false)}).then(r=>r.json());transcriptCity=settings.city||'';if(!whisperLoaded){for(const k of ['executable','model','language','task','timeoutSeconds','city','prompt'])whisperForm.elements[k].value=settings[k]??'';for(const k of ['enabled','normalize','redact'])whisperForm.elements[k].checked=!!settings[k];whisperLoaded=true}transcripts.innerHTML=items.map(x=>`<tr><td>${new Date(x.time).toLocaleTimeString()}</td><td>${esc(x.talkgroup)}</td><td>${esc(x.alias)}</td><td>${esc(x.text)}</td><td><button onclick="pinLocation(decodeURIComponent('${encodeURIComponent(x.text||'')}'))">Pin</button></td></tr>`).join('')}catch(e){whisperResult.textContent=e.message}}
         whisperForm.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(whisperForm),body=Object.fromEntries(f);for(const k of ['enabled','normalize','redact'])body[k]=f.has(k);body.timeoutSeconds=Number(body.timeoutSeconds||180);const r=await fetch('/api/v1/whisper-settings',{method:'POST',headers:apiHeaders(true),body:JSON.stringify(body)}),j=await r.json();whisperResult.textContent=r.ok?'Settings saved':j.error;whisperLoaded=false;refreshTranscripts()});
         async function pinLocation(text){const query=transcriptCity?text+', '+transcriptCity:text;try{const r=await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(query)),data=await r.json();if(!data.length){alert('No location found. Set a city or use an address.');return}const lat=Number(data[0].lat),lon=Number(data[0].lon);mapFrame.src='https://www.openstreetmap.org/export/embed.html?marker='+lat+'%2C'+lon+'&bbox='+(lon-.01)+'%2C'+(lat-.01)+'%2C'+(lon+.01)+'%2C'+(lat+.01)+'&layer=mapnik'}catch(e){alert('Geocoding failed: '+e.message)}}

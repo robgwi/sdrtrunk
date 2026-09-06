@@ -4,9 +4,9 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.7.0-beta-3
+## Current release: 0.7.0-beta-4
 
-- [Download Raspberry Pi ARM64 0.7 beta 3](https://github.com/robgwi/sdrtrunk/releases/tag/raspberry-pi-v0.7.0-beta-3)
+- [Download Raspberry Pi ARM64 0.7 beta 4](https://github.com/robgwi/sdrtrunk/releases/tag/raspberry-pi-v0.7.0-beta-4)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Upstream sdrtrunk wiki](https://github.com/DSheirer/sdrtrunk/wiki)
 
@@ -37,13 +37,15 @@ The web channel and talkgroup editor can:
 - Edit channel name, system, site, alias-list assignment, frequency, protocol, and auto-start.
 - Start and stop channels.
 - Add, edit, and delete talkgroup aliases in each channel's assigned alias list.
-- Configure and test a RadioReference Premium account, preview a trunked system by RadioReference System ID, and import its talkgroups into an alias list without duplicates.
+- Configure and test a RadioReference Premium account using the same shared service as the desktop editor.
+- Browse country, state, county, statewide systems, and county systems; then preview and selectively import trunked-system talkgroups without duplicates.
+- Filter RadioReference talkgroups by category or search text, create an alias list, identify previously imported entries, and optionally mark fully encrypted imports as Do Not Monitor.
 - Edit talkgroup name, category, protocol, numeric ID, recording flag, and playback priority.
 - Select the Remote Calls destinations that receive each talkgroup, using the same alias routing model as the desktop app.
 - Add, edit, enable, disable, and delete Remote Call API destinations, including authentication, retry, timeout, hosted Whisper, local Whisper, and translation settings.
 - Include the configured talkgroup alias in saved audio filenames for easier browsing and identification.
 
-Advanced protocol-specific decoder fields and non-talkgroup alias identifier types still use the Java desktop Playlist Editor. RadioReference location browsing remains available in the desktop editor; the web console imports by system ID.
+Advanced protocol-specific decoder fields, site/channel creation, conventional agency-frequency imports, and non-talkgroup alias identifier types still use the Java desktop Playlist Editor. The web RadioReference workflow now mirrors the desktop trunked-talkgroup import path.
 
 ### Desktop Playlist Editor improvements
 
@@ -77,8 +79,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-3.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-3
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-4.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-4
 bin/sdr-trunk
 ```
 
@@ -96,6 +98,16 @@ bin/sdr-trunk
 Environment variables override saved GUI token settings. Do not commit real keys or tokens to this repository.
 
 ## Release history
+
+### 0.7.0-beta-4
+
+- Rebuilt the web RadioReference modal around the desktop editor's trunked-talkgroup workflow.
+- Fixed sign-in failures being reported as HTTP 400; invalid, expired, unavailable, and Premium results now appear as readable account status.
+- Applied successful credentials to the application's shared RadioReference service and restored saved credentials when the web service initializes.
+- Added Country, State, County, and Trunked System browsing with preferred-location restoration.
+- Added category/search filtering, individual and visible-row selection, alias-list creation, existing-alias detection, and selective imports.
+- Added optional Do Not Monitor priority for fully encrypted imported talkgroups.
+- Improved upstream/network error status while reserving HTTP 400 for malformed user input.
 
 ### 0.7.0-beta-3
 
