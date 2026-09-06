@@ -12,11 +12,11 @@ sudo apt install libusb-1.0-0
 
 ## Install and run
 
-Copy `sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-4.zip` to the Pi, then run:
+Copy `sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-5.zip` to the Pi, then run:
 
 ```bash
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-4.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-4
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-5.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-5
 export SDRTRUNK_WEB_TOKEN='replace-with-a-long-random-token'
 bin/sdr-trunk
 ```

@@ -4,9 +4,9 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.7.0-beta-4
+## Current release: 0.7.0-beta-5
 
-- [Download Raspberry Pi ARM64 0.7 beta 4](https://github.com/robgwi/sdrtrunk/releases/tag/raspberry-pi-v0.7.0-beta-4)
+- [Download Raspberry Pi ARM64 0.7 beta 5](https://github.com/robgwi/sdrtrunk/releases/tag/raspberry-pi-v0.7.0-beta-5)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Upstream sdrtrunk wiki](https://github.com/DSheirer/sdrtrunk/wiki)
 
@@ -79,8 +79,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-4.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-4
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-5.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-5
 bin/sdr-trunk
 ```
 
@@ -98,6 +98,13 @@ bin/sdr-trunk
 Environment variables override saved GUI token settings. Do not commit real keys or tokens to this repository.
 
 ## Release history
+
+### 0.7.0-beta-5
+
+- Fixed unidentified or undefined talkgroups being encoded and played by the web console even though the desktop recorder rejected them.
+- Limited web live audio to completed, unencrypted, non-muted calls whose destination talkgroup has a configured, record-enabled alias.
+- Applied the desktop duplicate-call recording preference to web live audio.
+- Limited the real-time web scanner activity display to the same configured, record-enabled talkgroups so rejected traffic no longer appears as active.
 
 ### 0.7.0-beta-4
 

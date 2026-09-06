@@ -32,6 +32,7 @@ import io.github.dsheirer.alias.AliasList;
 import io.github.dsheirer.alias.AliasModel;
 import io.github.dsheirer.alias.id.AliasID;
 import io.github.dsheirer.alias.id.broadcast.BroadcastChannel;
+import io.github.dsheirer.alias.id.priority.Priority;
 import io.github.dsheirer.alias.id.talkgroup.Talkgroup;
 import io.github.dsheirer.controller.channel.Channel;
 import io.github.dsheirer.controller.channel.ChannelProcessingManager;
@@ -644,7 +645,18 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
     {
         try
         {
-            if(segment.hasAudio() && !segment.isEncrypted())
+            Identifier to = segment.getIdentifierCollection().getToIdentifier();
+            List<Alias> talkgroupAliases = getRecordableTalkgroupAliases(segment.getAliasList(), to);
+            boolean duplicateSuppressed = segment.isDuplicate() &&
+                mUserPreferences.getCallManagementPreference().isDuplicateRecordingSuppressionEnabled();
+
+            /*
+             * The web listener receives completed decoder audio before the recording manager applies its routing
+             * rules.  Require a record-enabled alias on the TO/talkgroup identifier so that source-radio aliases,
+             * channel record overrides, and unidentified traffic cannot leak into web playback.
+             */
+            if(segment.hasAudio() && !segment.isEncrypted() && segment.recordAudioProperty().get() &&
+                !segment.isDoNotMonitor() && !duplicateSuppressed && !talkgroupAliases.isEmpty())
             {
                 MP3AudioConverter converter = new MP3AudioConverter(InputAudioFormat.SR_8000,
                     MP3Setting.CBR_16, false);
@@ -653,16 +665,14 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
                 byte[] audio = output.toByteArray();
                 if(audio.length > 0)
                 {
-                    Identifier to = segment.getIdentifierCollection().getToIdentifier();
                     Identifier from = segment.getIdentifierCollection().getFromIdentifier();
-                    List<String> aliases = to != null && segment.getAliasList() != null ?
-                        segment.getAliasList().getAliases(to).stream().map(Alias::getName)
-                            .filter(name -> name != null && !name.isBlank()).toList() : List.of();
+                    List<String> aliases = talkgroupAliases.stream().map(Alias::getName)
+                        .filter(name -> name != null && !name.isBlank()).toList();
                     Identifier frequency = segment.getIdentifierCollection().getIdentifier(
                         IdentifierClass.CONFIGURATION, Form.CHANNEL_FREQUENCY, Role.ANY);
                     Map<String,Object> metadata = new LinkedHashMap<>();
-                    metadata.put("talkgroup", to != null ? to.toString() : "Unknown");
-                    metadata.put("alias", aliases.isEmpty() ? "Unidentified" : String.join(", ", aliases));
+                    metadata.put("talkgroup", to.toString());
+                    metadata.put("alias", aliases.isEmpty() ? "Configured Talkgroup" : String.join(", ", aliases));
                     metadata.put("source", from != null ? from.toString() : "Unknown");
                     metadata.put("frequency", frequency instanceof ConfigurationLongIdentifier value ?
                         value.getValue() : 0);
@@ -690,6 +700,18 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         {
             segment.decrementConsumerCount();
         }
+    }
+
+    private static List<Alias> getRecordableTalkgroupAliases(AliasList aliasList, Identifier talkgroup)
+    {
+        if(aliasList == null || talkgroup == null)
+        {
+            return List.of();
+        }
+
+        return aliasList.getAliases(talkgroup).stream()
+            .filter(alias -> alias != null && alias.isRecordable())
+            .toList();
     }
 
     private void liveAudio(HttpExchange exchange) throws IOException
@@ -760,11 +782,20 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
             item.put("protocol", event.getProtocol() != null ? event.getProtocol().toString() : "Unknown");
             item.put("type", event.getEventType() != null ? event.getEventType().toString() : "Activity");
             Identifier talkgroup = event.getIdentifierCollection().getToIdentifier();
-            item.put("talkgroup", talkgroup != null ? talkgroup.toString() : "Unknown");
             AliasList aliasList = mPlaylistManager.getAliasModel().getAliasList(event.getIdentifierCollection());
-            List<String> aliases = talkgroup != null && aliasList != null ? aliasList.getAliases(talkgroup).stream()
-                .map(Alias::getName).toList() : List.of();
-            item.put("alias", aliases.isEmpty() ? "Unidentified" : String.join(", ", aliases));
+            List<Alias> talkgroupAliases = getRecordableTalkgroupAliases(aliasList, talkgroup);
+
+            //Keep the scanner display aligned with web audio: ignore unconfigured, non-recorded, and muted calls.
+            if(talkgroupAliases.isEmpty() || talkgroupAliases.stream()
+                .anyMatch(alias -> alias.getPlaybackPriority() <= Priority.DO_NOT_MONITOR))
+            {
+                return;
+            }
+
+            List<String> aliases = talkgroupAliases.stream().map(Alias::getName)
+                .filter(name -> name != null && !name.isBlank()).toList();
+            item.put("talkgroup", talkgroup.toString());
+            item.put("alias", aliases.isEmpty() ? "Configured Talkgroup" : String.join(", ", aliases));
             item.put("source", event.getIdentifierCollection().getIdentifiers(Role.FROM).stream()
                 .map(Object::toString).findFirst().orElse(""));
             item.put("details", event.getDetails());
