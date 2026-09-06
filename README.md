@@ -4,10 +4,11 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.7.0-beta-6
+## Current release: 0.7.0-beta-7
 
-- [Download Raspberry Pi ARM64 0.7 beta 6](https://github.com/robgwi/sdrtrunk/releases/tag/raspberry-pi-v0.7.0-beta-6)
+- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 7](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-7)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
+- [Linux x86_64 installation guide](LINUX_X86_64.md)
 - [Local Whisper setup guide](WHISPER_SETUP.md)
 - [Upstream sdrtrunk wiki](https://github.com/DSheirer/sdrtrunk/wiki)
 
@@ -81,8 +82,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-6.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-6
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-7.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-7
 bin/sdr-trunk
 ```
 
@@ -100,6 +101,13 @@ bin/sdr-trunk
 Environment variables override saved GUI token settings. Do not commit real keys or tokens to this repository.
 
 ## Release history
+
+### 0.7.0-beta-7
+
+- Added a dedicated self-contained Linux x86_64 package for Intel and AMD desktops, mini PCs, and headless servers.
+- Enabled the embedded web console on all network interfaces by default in both Linux ARM64 and x86_64 packages.
+- Added Linux x86_64 installation, desktop/VNC, headless, and Whisper guidance.
+- Published ARM64 and x86_64 packages together so both architectures run the same source release.
 
 ### 0.7.0-beta-6
 
@@ -212,9 +220,10 @@ Environment variables override saved GUI token settings. Do not commit real keys
 ```bash
 ./gradlew test
 ./gradlew runtimeZipRaspberryPi
+./gradlew runtimeZipLinuxX86_64
 ```
 
-The Raspberry Pi ZIP is written under `build/image/`.
+The Raspberry Pi ARM64 and Linux x86_64 ZIPs are written under `build/image/`.
 
 ## Upstream project
 

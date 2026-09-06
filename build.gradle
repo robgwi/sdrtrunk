@@ -418,3 +418,23 @@ tasks.register('runtimeZipRaspberryPi', RuntimeZipTask) {rt ->
     rt.extension.imageZip.set(file(layout.buildDirectory.dir('image').get()
         .file('sdr-trunk-raspberry-pi-aarch64.zip')))
 }
+
+/**
+ * Creates a self-contained Linux x86-64 distribution with the same web-enabled defaults as the Raspberry Pi build.
+ * This package is intended for 64-bit Intel/AMD Linux desktops, mini PCs, and headless servers.
+ *
+ * Usage: ./gradlew runtimeZipLinuxX86_64
+ * Output: build/image/sdr-trunk-linux-x86_64-v<version>.zip
+ */
+tasks.register('runtimeZipLinuxX86_64', RuntimeZipTask) {rt ->
+    if(file(jdk_linux_x86_64).exists()) {
+        rt.extension.targetPlatform(targetLinuxX86_64, jdk_linux_x86_64, [])
+    }
+    else {
+        rt.extension.targetPlatform(targetLinuxX86_64) {
+            jdkHome = jdkDownload(jdk_download_linux_x86_64)
+        }
+    }
+
+    configure(rt, jvmArgsLinux + ['-Dsdrtrunk.web.enabled=true', '-Dsdrtrunk.web.bind=0.0.0.0'])
+}
