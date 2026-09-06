@@ -4,9 +4,9 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.7.0-beta-7
+## Current release: 0.7.0-beta-8
 
-- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 7](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-7)
+- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 8](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-8)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Linux x86_64 installation guide](LINUX_X86_64.md)
 - [Local Whisper setup guide](WHISPER_SETUP.md)
@@ -82,12 +82,12 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-7.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-7
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-8.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-8
 bin/sdr-trunk
 ```
 
-Open `http://<raspberry-pi-address>:8080/` from another computer. A desktop/VNC first launch asks you to create a web access token. A first headless launch generates a token, saves it, and writes it once to the startup log.
+Open `http://<raspberry-pi-address>:10000/` from another computer. A desktop/VNC first launch asks you to create a web access token. A first headless launch generates a token, saves it, and writes it once to the startup log.
 
 To supply secrets through the launch environment instead:
 
@@ -101,6 +101,13 @@ bin/sdr-trunk
 Environment variables override saved GUI token settings. Do not commit real keys or tokens to this repository.
 
 ## Release history
+
+### 0.7.0-beta-8
+
+- Changed the embedded web-console default port from 8080 to 10000.
+- Applied port 10000 consistently to the Raspberry Pi ARM64 and Linux x86_64 packages.
+- Updated the desktop Playlist Editor web-address help and all Linux, Raspberry Pi, and Whisper setup instructions.
+- Retained the `-Dsdrtrunk.web.port=<port>` Java property for custom port overrides.
 
 ### 0.7.0-beta-7
 

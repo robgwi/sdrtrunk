@@ -43,7 +43,7 @@ public class WebInterfaceEditor extends VBox
 
         refreshStatus();
         getChildren().addAll(title, help, controls, mStatus,
-            new Label("Web address: http://<this-computer-address>:8080/"));
+            new Label("Web address: http://<this-computer-address>:" + SdrTrunkWebServer.DEFAULT_PORT + "/"));
     }
 
     private void saveToken()

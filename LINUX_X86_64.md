@@ -14,8 +14,8 @@ Java 26 and JavaFX runtime, so a separate Java installation is not required.
 ```bash
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
-unzip sdr-trunk-linux-x86_64-v0.7.0-beta-7.zip
-cd sdr-trunk-linux-x86_64-v0.7.0-beta-7
+unzip sdr-trunk-linux-x86_64-v0.7.0-beta-8.zip
+cd sdr-trunk-linux-x86_64-v0.7.0-beta-8
 bin/sdr-trunk
 ```
 
@@ -27,7 +27,7 @@ When launched from a desktop or VNC terminal, the Java desktop application and w
 JAVA_OPTS='-Djava.awt.headless=true' bin/sdr-trunk
 ```
 
-The web console listens on port 8080. Open `http://<linux-computer-address>:8080/` from another computer.
+The web console listens on port 10000. Open `http://<linux-computer-address>:10000/` from another computer.
 
 On the first headless launch, sdrtrunk creates a random web access token, saves it, and writes it once to the startup
 log. You can also provide one explicitly:

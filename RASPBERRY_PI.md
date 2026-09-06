@@ -12,11 +12,11 @@ sudo apt install libusb-1.0-0
 
 ## Install and run
 
-Copy `sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-7.zip` to the Pi, then run:
+Copy `sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-8.zip` to the Pi, then run:
 
 ```bash
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-7.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-7
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-8.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-8
 export SDRTRUNK_WEB_TOKEN='replace-with-a-long-random-token'
 bin/sdr-trunk
 ```
@@ -67,7 +67,7 @@ web interface runs at the same time.  When no graphical display is available, st
 JAVA_OPTS='-Djava.awt.headless=true' bin/sdr-trunk
 ```
 
-Open `http://<raspberry-pi-address>:8080/` from another computer.  API clients must send the token as:
+Open `http://<raspberry-pi-address>:10000/` from another computer. API clients must send the token as:
 
 ```text
 Authorization: Bearer replace-with-a-long-random-token

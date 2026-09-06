@@ -76,6 +76,7 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
 {
     private static final Logger mLog = LoggerFactory.getLogger(SdrTrunkWebServer.class);
     private static final Gson GSON = new Gson();
+    public static final int DEFAULT_PORT = 10000;
     private static final long STARTED = System.currentTimeMillis();
     private static final String TOKEN_KEY = "sdrtrunk.web.access.token";
     private static volatile SdrTrunkWebServer ACTIVE;
@@ -136,7 +137,7 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
     public void start() throws IOException
     {
         String bind = System.getProperty("sdrtrunk.web.bind", "127.0.0.1");
-        int port = Integer.getInteger("sdrtrunk.web.port", 8080);
+        int port = Integer.getInteger("sdrtrunk.web.port", DEFAULT_PORT);
         mServer = HttpServer.create(new InetSocketAddress(bind, port), 0);
         mServer.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
         mServer.createContext("/api/v1/health", exchange -> json(exchange, 200, Map.of("status", "ok")));

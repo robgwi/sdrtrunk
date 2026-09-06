@@ -63,7 +63,7 @@ If this command fails, correct the Python installation before configuring sdrtru
 
 ## 3. Configure sdrtrunk
 
-1. Start sdrtrunk and open `http://<raspberry-pi-address>:8080/`.
+1. Start sdrtrunk and open `http://<raspberry-pi-address>:10000/`.
 2. Select **Settings** from the top menu.
 3. Set **Whisper executable** to the full path shown by:
 
