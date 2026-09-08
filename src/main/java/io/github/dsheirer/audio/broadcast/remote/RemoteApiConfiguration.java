@@ -39,6 +39,8 @@ public class RemoteApiConfiguration extends BroadcastConfiguration
     private final IntegerProperty mMaximumRetries = new SimpleIntegerProperty(5);
     private final IntegerProperty mMaximumConcurrentUploads = new SimpleIntegerProperty(2);
     private final IntegerProperty mRequestTimeoutSeconds = new SimpleIntegerProperty(60);
+    private final BooleanProperty mHeartbeatEnabled = new SimpleBooleanProperty(false);
+    private final IntegerProperty mHeartbeatIntervalSeconds = new SimpleIntegerProperty(60);
     private final BooleanProperty mOpenAiEnabled = new SimpleBooleanProperty(false);
     private final BooleanProperty mTranslateToEnglish = new SimpleBooleanProperty(false);
     private final StringProperty mOpenAiKeyEnvironmentVariable =
@@ -86,6 +88,14 @@ public class RemoteApiConfiguration extends BroadcastConfiguration
     @JacksonXmlProperty(isAttribute = true, localName = "request_timeout_seconds")
     public int getRequestTimeoutSeconds() { return mRequestTimeoutSeconds.get(); }
     public void setRequestTimeoutSeconds(int value) { mRequestTimeoutSeconds.set(Math.max(1, value)); }
+
+    @JacksonXmlProperty(isAttribute = true, localName = "heartbeat_enabled")
+    public boolean isHeartbeatEnabled() { return mHeartbeatEnabled.get(); }
+    public void setHeartbeatEnabled(boolean value) { mHeartbeatEnabled.set(value); }
+
+    @JacksonXmlProperty(isAttribute = true, localName = "heartbeat_interval_seconds")
+    public int getHeartbeatIntervalSeconds() { return mHeartbeatIntervalSeconds.get(); }
+    public void setHeartbeatIntervalSeconds(int value) { mHeartbeatIntervalSeconds.set(Math.max(5, value)); }
 
     @JacksonXmlProperty(isAttribute = true, localName = "openai_enabled")
     public boolean isOpenAiEnabled() { return mOpenAiEnabled.get(); }
@@ -135,6 +145,8 @@ public class RemoteApiConfiguration extends BroadcastConfiguration
         copy.setMaximumRetries(getMaximumRetries());
         copy.setMaximumConcurrentUploads(getMaximumConcurrentUploads());
         copy.setRequestTimeoutSeconds(getRequestTimeoutSeconds());
+        copy.setHeartbeatEnabled(isHeartbeatEnabled());
+        copy.setHeartbeatIntervalSeconds(getHeartbeatIntervalSeconds());
         copy.setOpenAiEnabled(isOpenAiEnabled());
         copy.setTranslateToEnglish(isTranslateToEnglish());
         copy.setOpenAiKeyEnvironmentVariable(getOpenAiKeyEnvironmentVariable());

@@ -6,13 +6,18 @@ import io.github.dsheirer.audio.broadcast.AudioRecording;
 import io.github.dsheirer.audio.broadcast.BroadcastEvent;
 import io.github.dsheirer.audio.broadcast.BroadcastState;
 import io.github.dsheirer.util.ThreadPool;
+import java.lang.management.ManagementFactory;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.PriorityBlockingQueue;
@@ -33,8 +38,13 @@ public class RemoteApiBroadcaster extends AbstractAudioBroadcaster<RemoteApiConf
     private final HttpClient mHttpClient;
     private final Semaphore mUploadSlots;
     private final AtomicBoolean mRunning = new AtomicBoolean();
+    private final AtomicBoolean mHeartbeatInFlight = new AtomicBoolean();
     private ScheduledFuture<?> mProcessor;
+    private ScheduledFuture<?> mHeartbeatProcessor;
     private final SpeechProcessor mSpeechProcessor;
+    private volatile long mLastHeartbeatAttempt;
+    private volatile long mLastHeartbeatSuccess;
+    private volatile String mLastHeartbeatError = "";
 
     public RemoteApiBroadcaster(RemoteApiConfiguration configuration)
     {
@@ -66,9 +76,15 @@ public class RemoteApiBroadcaster extends AbstractAudioBroadcaster<RemoteApiConf
     {
         if(mRunning.compareAndSet(false, true))
         {
-            setBroadcastState(BroadcastState.CONNECTED);
+            setBroadcastState(getBroadcastConfiguration().isHeartbeatEnabled() ? BroadcastState.CONNECTING :
+                BroadcastState.CONNECTED);
             mProcessor = ThreadPool.SCHEDULED.scheduleWithFixedDelay(this::processQueue, 0, 250,
                 TimeUnit.MILLISECONDS);
+            if(getBroadcastConfiguration().isHeartbeatEnabled())
+            {
+                mHeartbeatProcessor = ThreadPool.SCHEDULED.scheduleWithFixedDelay(this::sendHeartbeat, 0,
+                    getBroadcastConfiguration().getHeartbeatIntervalSeconds(), TimeUnit.SECONDS);
+            }
         }
     }
 
@@ -80,6 +96,11 @@ public class RemoteApiBroadcaster extends AbstractAudioBroadcaster<RemoteApiConf
         {
             mProcessor.cancel(true);
             mProcessor = null;
+        }
+        if(mHeartbeatProcessor != null)
+        {
+            mHeartbeatProcessor.cancel(true);
+            mHeartbeatProcessor = null;
         }
         dispose();
         setBroadcastState(BroadcastState.DISCONNECTED);
@@ -185,13 +206,7 @@ public class RemoteApiBroadcaster extends AbstractAudioBroadcaster<RemoteApiConf
                     .header("User-Agent", "sdrtrunk")
                     .header("Idempotency-Key", metadata.getCallId())
                     .POST(body.publisher());
-                String key = getBroadcastConfiguration().resolveApiKey();
-                if(key != null && !key.isBlank() && getBroadcastConfiguration().getAuthenticationHeader() != null &&
-                    !getBroadcastConfiguration().getAuthenticationHeader().isBlank())
-                {
-                    request.header(getBroadcastConfiguration().getAuthenticationHeader(),
-                        getBroadcastConfiguration().getAuthenticationPrefix() + key);
-                }
+                addAuthentication(request);
                 return mHttpClient.sendAsync(request.build(), HttpResponse.BodyHandlers.ofString()).thenAccept(response ->
                 {
                     if(response.statusCode() < 200 || response.statusCode() >= 300)
@@ -206,6 +221,109 @@ public class RemoteApiBroadcaster extends AbstractAudioBroadcaster<RemoteApiConf
             }
         });
     }
+
+    private void sendHeartbeat()
+    {
+        if(!mRunning.get() || !mHeartbeatInFlight.compareAndSet(false, true))
+        {
+            return;
+        }
+
+        mLastHeartbeatAttempt = System.currentTimeMillis();
+        try
+        {
+            Map<String,Object> heartbeat = new LinkedHashMap<>();
+            heartbeat.put("event", "heartbeat");
+            heartbeat.put("status", "online");
+            heartbeat.put("connected", true);
+            heartbeat.put("timestamp", mLastHeartbeatAttempt);
+            heartbeat.put("timestampIso", Instant.ofEpochMilli(mLastHeartbeatAttempt).toString());
+            heartbeat.put("application", "sdrtrunk");
+            heartbeat.put("version", applicationVersion());
+            heartbeat.put("destination", getBroadcastConfiguration().getName());
+            heartbeat.put("hostname", hostname());
+            heartbeat.put("uptimeMs", ManagementFactory.getRuntimeMXBean().getUptime());
+            heartbeat.put("queuedCalls", getAudioQueueSize());
+
+            HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(getBroadcastConfiguration().getHost()))
+                .timeout(Duration.ofSeconds(getBroadcastConfiguration().getRequestTimeoutSeconds()))
+                .header("Content-Type", "application/json; charset=UTF-8")
+                .header("User-Agent", "sdrtrunk")
+                .header("X-SDRTrunk-Event", "heartbeat")
+                .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(heartbeat)));
+            addAuthentication(request);
+            mHttpClient.sendAsync(request.build(), HttpResponse.BodyHandlers.ofString())
+                .whenComplete((response, error) -> completeHeartbeat(response, error));
+        }
+        catch(Exception e)
+        {
+            completeHeartbeat(null, e);
+        }
+    }
+
+    private void completeHeartbeat(HttpResponse<String> response, Throwable error)
+    {
+        try
+        {
+            if(!mRunning.get())
+            {
+                return;
+            }
+
+            if(error == null && response != null && response.statusCode() >= 200 && response.statusCode() < 300)
+            {
+                mLastHeartbeatSuccess = System.currentTimeMillis();
+                mLastHeartbeatError = "";
+                setBroadcastState(BroadcastState.CONNECTED);
+            }
+            else
+            {
+                String message = error != null ? rootMessage(error) :
+                    "Remote API returned HTTP " + (response != null ? response.statusCode() : "unknown");
+                mLastHeartbeatError = message;
+                setBroadcastState(BroadcastState.TEMPORARY_BROADCAST_ERROR);
+                mLog.warn("Remote API heartbeat failed for [{}]: {}", getBroadcastConfiguration().getName(), message);
+            }
+        }
+        finally
+        {
+            mHeartbeatInFlight.set(false);
+        }
+    }
+
+    private void addAuthentication(HttpRequest.Builder request)
+    {
+        String key = getBroadcastConfiguration().resolveApiKey();
+        String header = getBroadcastConfiguration().getAuthenticationHeader();
+        if(key != null && !key.isBlank() && header != null && !header.isBlank())
+        {
+            String prefix = getBroadcastConfiguration().getAuthenticationPrefix();
+            request.header(header, (prefix != null ? prefix : "") + key);
+        }
+    }
+
+    private static String hostname()
+    {
+        try { return InetAddress.getLocalHost().getHostName(); }
+        catch(Exception e) { return "unknown"; }
+    }
+
+    private static String applicationVersion()
+    {
+        String version = RemoteApiBroadcaster.class.getPackage().getImplementationVersion();
+        return version != null && !version.isBlank() ? version : "development";
+    }
+
+    private static String rootMessage(Throwable error)
+    {
+        Throwable cause = error;
+        while(cause.getCause() != null) { cause = cause.getCause(); }
+        return cause.getMessage() != null ? cause.getMessage() : cause.getClass().getSimpleName();
+    }
+
+    public long getLastHeartbeatAttempt() { return mLastHeartbeatAttempt; }
+    public long getLastHeartbeatSuccess() { return mLastHeartbeatSuccess; }
+    public String getLastHeartbeatError() { return mLastHeartbeatError; }
 
     private void retryOrFail(QueuedCall call, Throwable error)
     {

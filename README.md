@@ -4,12 +4,13 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.7.0-beta-8
+## Current release: 0.7.0-beta-9
 
-- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 8](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-8)
+- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 9](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-9)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Linux x86_64 installation guide](LINUX_X86_64.md)
 - [Local Whisper setup guide](WHISPER_SETUP.md)
+- [Remote Call API and heartbeat guide](REMOTE_API.md)
 - [Upstream sdrtrunk wiki](https://github.com/DSheirer/sdrtrunk/wiki)
 
 The Raspberry Pi archive contains its own ARM64 Java and JavaFX runtime. A separate Java installation is not needed. It supports the Java desktop plus web console when launched from Raspberry Pi Desktop or VNC, and headless receiver plus web console when launched without a display or with `-Djava.awt.headless=true`.
@@ -44,7 +45,7 @@ The web channel and talkgroup editor can:
 - Filter RadioReference talkgroups by category or search text, create an alias list, identify previously imported entries, and optionally mark fully encrypted imports as Do Not Monitor.
 - Edit talkgroup name, category, protocol, numeric ID, recording flag, and playback priority.
 - Select the Remote Calls destinations that receive each talkgroup, using the same alias routing model as the desktop app.
-- Add, edit, enable, disable, and delete Remote Call API destinations, including authentication, retry, timeout, hosted Whisper, local Whisper, and translation settings.
+- Add, edit, enable, disable, and delete Remote Call API destinations, including authentication, heartbeat, retry, timeout, hosted Whisper, local Whisper, and translation settings.
 - Include the configured talkgroup alias in saved audio filenames for easier browsing and identification.
 
 Advanced protocol-specific decoder fields, site/channel creation, conventional agency-frequency imports, and non-talkgroup alias identifier types still use the Java desktop Playlist Editor. The web RadioReference workflow now mirrors the desktop trunked-talkgroup import path.
@@ -60,6 +61,7 @@ Advanced protocol-specific decoder fields, site/channel creation, conventional a
 
 - POST completed calls and metadata to a configurable API URL with an MP3 attachment.
 - Authenticate using an API key stored in an environment variable.
+- Optionally POST an authenticated JSON online heartbeat at a configurable interval and show its last connection result.
 - Transcribe locally or use OpenAI `whisper-1`.
 - Optionally translate supported audio to English through the hosted OpenAI workflow.
 - Existing Rdio Scanner uploads continue to use `<Rdio Scanner URL>/api/call-upload`.
@@ -82,8 +84,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-8.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-8
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-9.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-9
 bin/sdr-trunk
 ```
 
@@ -101,6 +103,15 @@ bin/sdr-trunk
 Environment variables override saved GUI token settings. Do not commit real keys or tokens to this repository.
 
 ## Release history
+
+### 0.7.0-beta-9
+
+- Added an optional heartbeat toggle and configurable interval to each Remote Call API destination.
+- Sends an authenticated JSON online heartbeat immediately at startup and periodically to the destination's existing POST URL.
+- Uses heartbeat responses to report Connecting, Connected, and Temporary Broadcast Error states.
+- Shows the last successful heartbeat time or current heartbeat error in the Remote Calls web window.
+- Preserved heartbeat settings in the playlist and when copying Remote Call configurations.
+- Added a Remote Call API guide with the heartbeat and completed-call request contracts.
 
 ### 0.7.0-beta-8
 
