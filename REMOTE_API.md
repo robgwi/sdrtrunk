@@ -9,7 +9,9 @@ Open the web console and select **Remote Calls > Add Destination**. Configure:
 
 - **Name:** a unique destination name used by talkgroup alias routing.
 - **POST URL:** the receiving API endpoint for calls and heartbeats.
-- **API key environment variable:** defaults to `SDRTRUNK_REMOTE_API_KEY`.
+- **API key:** optionally save a key in the playlist from the web editor.
+- **API key environment variable:** defaults to `SDRTRUNK_REMOTE_API_KEY`; when set, its value takes priority over the
+  saved key.
 - **Authentication header/prefix:** defaults to `Authorization` and `Bearer `.
 - **Send heartbeat:** enables or disables online heartbeats for this destination.
 - **Heartbeat interval seconds:** how often to send, with a minimum of 5 seconds and a default of 60 seconds.
@@ -40,7 +42,7 @@ X-SDRTrunk-Event: heartbeat
   "timestamp": 1788667200000,
   "timestampIso": "2026-09-06T12:00:00Z",
   "application": "sdrtrunk",
-  "version": "0.7.0-beta-9",
+  "version": "0.7.0-beta-10",
   "destination": "Dispatch API",
   "hostname": "scanner-host",
   "uptimeMs": 86400000,
@@ -49,11 +51,17 @@ X-SDRTrunk-Event: heartbeat
 ```
 
 The receiving server must return any HTTP 2xx status. A successful response updates the destination to **Connected**
-and records the latest success time in the web console. A network failure or non-2xx response changes the state to
-**Temporary Broadcast Error**, displays the error, and tries again at the next heartbeat interval.
+and records the latest success time in the web console. A network failure, timeout, stale connection, or non-2xx
+response changes the state to **Connecting**, discards the current pooled HTTP connection, and retries with bounded
+exponential backoff. Healthy heartbeats continue at the configured interval. The Remote Calls window shows the last
+successful contact, HTTP error details, recovery count, and a manual **Reconnect** action.
 
 Turning the heartbeat off stops heartbeat requests but does not disable call uploads. Disabling the entire destination
 stops both calls and heartbeats.
+
+An idle HTTP destination cannot be health-checked when heartbeat is disabled. Enable heartbeat for continuous stale
+connection detection. With heartbeat disabled, a failed completed-call upload still rebuilds the HTTP connection and
+uses the configured call retry policy.
 
 ## Completed-call request
 
@@ -84,6 +92,7 @@ For online monitoring, consider a scanner offline after it has missed two or thr
 
 ## Security
 
-Store the API key in the configured environment variable rather than the playlist. Use HTTPS for destinations outside
-the trusted local network. Heartbeats contain the scanner host name, software version, uptime, and queue size, but do
-not contain talkgroup or audio data.
+Prefer the configured environment variable instead of saving an API key in the playlist. The web API reports only
+whether a key resolves and never returns its value. Use HTTPS for destinations outside the trusted local network.
+Heartbeats contain the scanner host name, software version, uptime, and queue size, but do not contain talkgroup or
+audio data.

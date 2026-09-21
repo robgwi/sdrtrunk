@@ -4,9 +4,9 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.7.0-beta-9
+## Current release: 0.7.0-beta-10
 
-- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 9](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-9)
+- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 10](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-10)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Linux x86_64 installation guide](LINUX_X86_64.md)
 - [Local Whisper setup guide](WHISPER_SETUP.md)
@@ -84,8 +84,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-9.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-9
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-10.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-10
 bin/sdr-trunk
 ```
 
@@ -103,6 +103,17 @@ bin/sdr-trunk
 Environment variables override saved GUI token settings. Do not commit real keys or tokens to this repository.
 
 ## Release history
+
+### 0.7.0-beta-10
+
+- Added a Remote API heartbeat watchdog that detects failed or stale connections and retries with bounded exponential backoff.
+- Rebuilds the Java HTTP client after a failed heartbeat or completed-call upload so stale pooled connections cannot permanently stop delivery.
+- Fixed a completed-call preparation failure that could consume an upload worker slot and eventually stall the destination.
+- Preserves queued calls while reconnecting and continues the existing per-call retry policy.
+- Expanded the Remote Calls web window with last contact, last heartbeat, last completed-call delivery, reconnect count, API-key availability, and detailed HTTP errors.
+- Added a manual **Reconnect** action that immediately discards the current HTTP connection and runs a new heartbeat health check.
+- Added an optional masked API-key field to the web destination editor while continuing to prefer the configured environment variable.
+- Added automated failure/recovery coverage proving that a rejected heartbeat reconnects and returns to Connected.
 
 ### 0.7.0-beta-9
 

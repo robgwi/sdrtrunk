@@ -25,6 +25,8 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,35 +37,48 @@ public class RemoteApiBroadcaster extends AbstractAudioBroadcaster<RemoteApiConf
     private static final Gson GSON = new Gson();
     private final Queue<QueuedCall> mQueue = new PriorityBlockingQueue<>(32,
         Comparator.comparingLong(QueuedCall::nextAttempt));
-    private final HttpClient mHttpClient;
+    private final Duration mRequestTimeout;
+    private final Object mConnectionLock = new Object();
+    private volatile HttpClient mHttpClient;
     private final Semaphore mUploadSlots;
     private final AtomicBoolean mRunning = new AtomicBoolean();
     private final AtomicBoolean mHeartbeatInFlight = new AtomicBoolean();
+    private final AtomicInteger mConsecutiveConnectionFailures = new AtomicInteger();
+    private final AtomicInteger mReconnectCount = new AtomicInteger();
+    private final AtomicLong mHttpClientGeneration = new AtomicLong();
     private ScheduledFuture<?> mProcessor;
     private ScheduledFuture<?> mHeartbeatProcessor;
+    private volatile CompletableFuture<HttpResponse<String>> mHeartbeatRequest;
     private final SpeechProcessor mSpeechProcessor;
+    private volatile long mStarted;
+    private volatile long mNextHeartbeatAttempt;
     private volatile long mLastHeartbeatAttempt;
     private volatile long mLastHeartbeatSuccess;
     private volatile String mLastHeartbeatError = "";
+    private volatile long mLastCallAttempt;
+    private volatile long mLastCallSuccess;
+    private volatile String mLastCallError = "";
+    private volatile long mLastContactAttempt;
+    private volatile long mLastContactSuccess;
+    private volatile long mLastReconnect;
 
     public RemoteApiBroadcaster(RemoteApiConfiguration configuration)
     {
         super(configuration);
-        Duration timeout = Duration.ofSeconds(configuration.getRequestTimeoutSeconds());
-        mHttpClient = HttpClient.newBuilder().connectTimeout(timeout)
-            .followRedirects(HttpClient.Redirect.NORMAL).build();
+        mRequestTimeout = Duration.ofSeconds(configuration.getRequestTimeoutSeconds());
+        mHttpClient = createHttpClient();
         mUploadSlots = new Semaphore(configuration.getMaximumConcurrentUploads());
         if(configuration.isOpenAiEnabled())
         {
             mSpeechProcessor = new OpenAiWhisperProcessor(configuration.getOpenAiKeyEnvironmentVariable(),
-                configuration.isTranslateToEnglish(), timeout);
+                configuration.isTranslateToEnglish(), mRequestTimeout);
         }
         else if(configuration.getLocalWhisperExecutable() != null &&
             !configuration.getLocalWhisperExecutable().isBlank() && configuration.getLocalWhisperModel() != null &&
             !configuration.getLocalWhisperModel().isBlank())
         {
             mSpeechProcessor = new LocalWhisperProcessor(configuration.getLocalWhisperExecutable(),
-                configuration.getLocalWhisperModel(), configuration.isTranslateToEnglish(), timeout);
+                configuration.getLocalWhisperModel(), configuration.isTranslateToEnglish(), mRequestTimeout);
         }
         else
         {
@@ -76,14 +91,18 @@ public class RemoteApiBroadcaster extends AbstractAudioBroadcaster<RemoteApiConf
     {
         if(mRunning.compareAndSet(false, true))
         {
+            mStarted = System.currentTimeMillis();
+            mNextHeartbeatAttempt = mStarted;
             setBroadcastState(getBroadcastConfiguration().isHeartbeatEnabled() ? BroadcastState.CONNECTING :
                 BroadcastState.CONNECTED);
             mProcessor = ThreadPool.SCHEDULED.scheduleWithFixedDelay(this::processQueue, 0, 250,
                 TimeUnit.MILLISECONDS);
             if(getBroadcastConfiguration().isHeartbeatEnabled())
             {
-                mHeartbeatProcessor = ThreadPool.SCHEDULED.scheduleWithFixedDelay(this::sendHeartbeat, 0,
-                    getBroadcastConfiguration().getHeartbeatIntervalSeconds(), TimeUnit.SECONDS);
+                //Run a short watchdog interval so that failed or stale requests retry sooner than the normal heartbeat
+                //interval.  The due timestamp still controls the configured cadence when the connection is healthy.
+                mHeartbeatProcessor = ThreadPool.SCHEDULED.scheduleWithFixedDelay(this::monitorHeartbeat, 0, 1,
+                    TimeUnit.SECONDS);
             }
         }
     }
@@ -102,6 +121,13 @@ public class RemoteApiBroadcaster extends AbstractAudioBroadcaster<RemoteApiConf
             mHeartbeatProcessor.cancel(true);
             mHeartbeatProcessor = null;
         }
+        CompletableFuture<HttpResponse<String>> heartbeatRequest = mHeartbeatRequest;
+        if(heartbeatRequest != null)
+        {
+            heartbeatRequest.cancel(true);
+            mHeartbeatRequest = null;
+        }
+        mHeartbeatInFlight.set(false);
         dispose();
         setBroadcastState(BroadcastState.DISCONNECTED);
     }
@@ -153,13 +179,32 @@ public class RemoteApiBroadcaster extends AbstractAudioBroadcaster<RemoteApiConf
                     mUploadSlots.release();
                     continue;
                 }
-                upload(call).whenComplete((ignored, error) ->
+                CompletableFuture<Void> upload;
+                try
+                {
+                    upload = upload(call);
+                }
+                catch(Exception e)
+                {
+                    //A synchronous preparation failure must not permanently consume a semaphore permit.
+                    try
+                    {
+                        retryOrFail(call, e);
+                    }
+                    finally
+                    {
+                        mUploadSlots.release();
+                        queueChanged();
+                    }
+                    continue;
+                }
+                upload.whenComplete((ignored, error) ->
                 {
                     try
                     {
                         if(error == null)
                         {
-                            setBroadcastState(BroadcastState.CONNECTED);
+                            connectionSucceeded();
                             incrementStreamedAudioCount();
                             broadcast(new BroadcastEvent(this, BroadcastEvent.Event.BROADCASTER_STREAMED_COUNT_CHANGE));
                             call.recording().removePendingReplay();
@@ -201,18 +246,23 @@ public class RemoteApiBroadcaster extends AbstractAudioBroadcaster<RemoteApiConf
                     .text("metadata", GSON.toJson(metadata))
                     .file("audio", recording.getPath().getFileName().toString(), "audio/mpeg", audio);
                 HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(getBroadcastConfiguration().getHost()))
-                    .timeout(Duration.ofSeconds(getBroadcastConfiguration().getRequestTimeoutSeconds()))
+                    .timeout(mRequestTimeout)
                     .header("Content-Type", "multipart/form-data; boundary=" + body.boundary())
                     .header("User-Agent", "sdrtrunk")
                     .header("Idempotency-Key", metadata.getCallId())
                     .POST(body.publisher());
                 addAuthentication(request);
-                return mHttpClient.sendAsync(request.build(), HttpResponse.BodyHandlers.ofString()).thenAccept(response ->
+                mLastCallAttempt = System.currentTimeMillis();
+                mLastContactAttempt = mLastCallAttempt;
+                HttpClient client = mHttpClient;
+                return client.sendAsync(request.build(), HttpResponse.BodyHandlers.ofString()).thenAccept(response ->
                 {
                     if(response.statusCode() < 200 || response.statusCode() >= 300)
                     {
-                        throw new IllegalStateException("Remote API returned HTTP " + response.statusCode());
+                        throw new IllegalStateException(responseError(response));
                     }
+                    mLastCallSuccess = System.currentTimeMillis();
+                    mLastCallError = "";
                 });
             }
             catch(Exception e)
@@ -222,46 +272,7 @@ public class RemoteApiBroadcaster extends AbstractAudioBroadcaster<RemoteApiConf
         });
     }
 
-    private void sendHeartbeat()
-    {
-        if(!mRunning.get() || !mHeartbeatInFlight.compareAndSet(false, true))
-        {
-            return;
-        }
-
-        mLastHeartbeatAttempt = System.currentTimeMillis();
-        try
-        {
-            Map<String,Object> heartbeat = new LinkedHashMap<>();
-            heartbeat.put("event", "heartbeat");
-            heartbeat.put("status", "online");
-            heartbeat.put("connected", true);
-            heartbeat.put("timestamp", mLastHeartbeatAttempt);
-            heartbeat.put("timestampIso", Instant.ofEpochMilli(mLastHeartbeatAttempt).toString());
-            heartbeat.put("application", "sdrtrunk");
-            heartbeat.put("version", applicationVersion());
-            heartbeat.put("destination", getBroadcastConfiguration().getName());
-            heartbeat.put("hostname", hostname());
-            heartbeat.put("uptimeMs", ManagementFactory.getRuntimeMXBean().getUptime());
-            heartbeat.put("queuedCalls", getAudioQueueSize());
-
-            HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(getBroadcastConfiguration().getHost()))
-                .timeout(Duration.ofSeconds(getBroadcastConfiguration().getRequestTimeoutSeconds()))
-                .header("Content-Type", "application/json; charset=UTF-8")
-                .header("User-Agent", "sdrtrunk")
-                .header("X-SDRTrunk-Event", "heartbeat")
-                .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(heartbeat)));
-            addAuthentication(request);
-            mHttpClient.sendAsync(request.build(), HttpResponse.BodyHandlers.ofString())
-                .whenComplete((response, error) -> completeHeartbeat(response, error));
-        }
-        catch(Exception e)
-        {
-            completeHeartbeat(null, e);
-        }
-    }
-
-    private void completeHeartbeat(HttpResponse<String> response, Throwable error)
+    private void monitorHeartbeat()
     {
         try
         {
@@ -270,25 +281,232 @@ public class RemoteApiBroadcaster extends AbstractAudioBroadcaster<RemoteApiConf
                 return;
             }
 
+            long now = System.currentTimeMillis();
+            if(isConnectionStale() && !mHeartbeatInFlight.get() && now - mLastReconnect > heartbeatIntervalMillis())
+            {
+                mLastHeartbeatError = "No successful contact within the heartbeat stale window";
+                recoverConnection(mLastHeartbeatError);
+                mNextHeartbeatAttempt = now;
+            }
+
+            if(now >= mNextHeartbeatAttempt)
+            {
+                sendHeartbeat();
+            }
+        }
+        catch(Exception e)
+        {
+            mLastHeartbeatError = rootMessage(e);
+            recoverConnection(mLastHeartbeatError);
+            mNextHeartbeatAttempt = System.currentTimeMillis() + retryDelayMillis();
+            mHeartbeatInFlight.set(false);
+            mLog.error("Error monitoring Remote API heartbeat for [{}]",
+                getBroadcastConfiguration().getName(), e);
+        }
+    }
+
+    private void sendHeartbeat()
+    {
+        long clientGeneration;
+        CompletableFuture<HttpResponse<String>> heartbeatRequest;
+        Exception preparationError = null;
+
+        synchronized(mConnectionLock)
+        {
+            if(!mRunning.get() || !mHeartbeatInFlight.compareAndSet(false, true))
+            {
+                return;
+            }
+
+            mLastHeartbeatAttempt = System.currentTimeMillis();
+            mLastContactAttempt = mLastHeartbeatAttempt;
+            clientGeneration = mHttpClientGeneration.get();
+            try
+            {
+                Map<String,Object> heartbeat = new LinkedHashMap<>();
+                heartbeat.put("event", "heartbeat");
+                heartbeat.put("status", "online");
+                heartbeat.put("connected", true);
+                heartbeat.put("timestamp", mLastHeartbeatAttempt);
+                heartbeat.put("timestampIso", Instant.ofEpochMilli(mLastHeartbeatAttempt).toString());
+                heartbeat.put("application", "sdrtrunk");
+                heartbeat.put("version", applicationVersion());
+                heartbeat.put("destination", getBroadcastConfiguration().getName());
+                heartbeat.put("hostname", hostname());
+                heartbeat.put("uptimeMs", ManagementFactory.getRuntimeMXBean().getUptime());
+                heartbeat.put("queuedCalls", getAudioQueueSize());
+
+                HttpRequest.Builder request =
+                    HttpRequest.newBuilder(URI.create(getBroadcastConfiguration().getHost()))
+                        .timeout(mRequestTimeout)
+                        .header("Content-Type", "application/json; charset=UTF-8")
+                        .header("User-Agent", "sdrtrunk")
+                        .header("X-SDRTrunk-Event", "heartbeat")
+                        .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(heartbeat)));
+                addAuthentication(request);
+                heartbeatRequest = mHttpClient.sendAsync(request.build(), HttpResponse.BodyHandlers.ofString())
+                    .orTimeout(mRequestTimeout.toMillis() + 1_000L, TimeUnit.MILLISECONDS);
+                mHeartbeatRequest = heartbeatRequest;
+            }
+            catch(Exception e)
+            {
+                heartbeatRequest = null;
+                preparationError = e;
+            }
+        }
+
+        if(preparationError != null)
+        {
+            completeHeartbeat(null, preparationError, clientGeneration);
+        }
+        else
+        {
+            heartbeatRequest.whenComplete((response, error) ->
+                completeHeartbeat(response, error, clientGeneration));
+        }
+    }
+
+    private void completeHeartbeat(HttpResponse<String> response, Throwable error, long clientGeneration)
+    {
+        if(!mRunning.get() || clientGeneration != mHttpClientGeneration.get())
+        {
+            return;
+        }
+
+        try
+        {
             if(error == null && response != null && response.statusCode() >= 200 && response.statusCode() < 300)
             {
                 mLastHeartbeatSuccess = System.currentTimeMillis();
                 mLastHeartbeatError = "";
-                setBroadcastState(BroadcastState.CONNECTED);
+                connectionSucceeded();
+                mNextHeartbeatAttempt = System.currentTimeMillis() + heartbeatIntervalMillis();
             }
             else
             {
                 String message = error != null ? rootMessage(error) :
-                    "Remote API returned HTTP " + (response != null ? response.statusCode() : "unknown");
+                    (response != null ? responseError(response) : "Remote API returned an unknown response");
                 mLastHeartbeatError = message;
-                setBroadcastState(BroadcastState.TEMPORARY_BROADCAST_ERROR);
+                recoverConnection(message);
+                mNextHeartbeatAttempt = System.currentTimeMillis() + retryDelayMillis();
                 mLog.warn("Remote API heartbeat failed for [{}]: {}", getBroadcastConfiguration().getName(), message);
             }
         }
         finally
         {
-            mHeartbeatInFlight.set(false);
+            if(clientGeneration == mHttpClientGeneration.get())
+            {
+                mHeartbeatRequest = null;
+                mHeartbeatInFlight.set(false);
+            }
         }
+    }
+
+    /** Discards pooled HTTP connections and schedules an immediate health check without dropping queued calls. */
+    public void reconnect()
+    {
+        if(!mRunning.get())
+        {
+            return;
+        }
+
+        rebuildHttpClient();
+        mConsecutiveConnectionFailures.set(0);
+        mLastHeartbeatError = "";
+        mLastCallError = "";
+        if(getBroadcastConfiguration().isHeartbeatEnabled())
+        {
+            setBroadcastState(BroadcastState.CONNECTING);
+            mNextHeartbeatAttempt = 0;
+        }
+        else
+        {
+            setBroadcastState(BroadcastState.CONNECTED);
+        }
+    }
+
+    private HttpClient createHttpClient()
+    {
+        return HttpClient.newBuilder().connectTimeout(mRequestTimeout)
+            .followRedirects(HttpClient.Redirect.NORMAL).build();
+    }
+
+    private void rebuildHttpClient()
+    {
+        synchronized(mConnectionLock)
+        {
+            mHttpClientGeneration.incrementAndGet();
+            CompletableFuture<HttpResponse<String>> heartbeatRequest = mHeartbeatRequest;
+            mHeartbeatRequest = null;
+            mHeartbeatInFlight.set(false);
+            if(heartbeatRequest != null && !heartbeatRequest.isDone())
+            {
+                heartbeatRequest.cancel(true);
+            }
+            mHttpClient = createHttpClient();
+            mLastReconnect = System.currentTimeMillis();
+            mReconnectCount.incrementAndGet();
+        }
+    }
+
+    private void recoverConnection(String message)
+    {
+        mConsecutiveConnectionFailures.incrementAndGet();
+        rebuildHttpClient();
+        mNextHeartbeatAttempt = 0;
+        setBroadcastState(BroadcastState.CONNECTING);
+        mLog.info("Remote API connection [{}] is reconnecting after: {}",
+            getBroadcastConfiguration().getName(), message);
+    }
+
+    private void connectionSucceeded()
+    {
+        mLastContactSuccess = System.currentTimeMillis();
+        mConsecutiveConnectionFailures.set(0);
+        setBroadcastState(BroadcastState.CONNECTED);
+    }
+
+    private long heartbeatIntervalMillis()
+    {
+        return TimeUnit.SECONDS.toMillis(getBroadcastConfiguration().getHeartbeatIntervalSeconds());
+    }
+
+    private long staleWindowMillis()
+    {
+        return Math.max(heartbeatIntervalMillis() * 3L, mRequestTimeout.toMillis() * 2L + 2_000L);
+    }
+
+    private long retryDelayMillis()
+    {
+        int failures = Math.min(mConsecutiveConnectionFailures.get(), 6);
+        long backoff = 1_000L << Math.max(0, failures - 1);
+        return Math.min(heartbeatIntervalMillis(), Math.min(60_000L, backoff));
+    }
+
+    public boolean isConnectionStale()
+    {
+        if(!mRunning.get() || !getBroadcastConfiguration().isHeartbeatEnabled())
+        {
+            return false;
+        }
+        long lastSuccess = Math.max(mLastHeartbeatSuccess, mLastContactSuccess);
+        long reference = lastSuccess > 0 ? lastSuccess : mStarted;
+        return reference > 0 && System.currentTimeMillis() - reference > staleWindowMillis();
+    }
+
+    private static String responseError(HttpResponse<String> response)
+    {
+        String body = response.body();
+        if(body == null || body.isBlank())
+        {
+            return "Remote API returned HTTP " + response.statusCode();
+        }
+        String compact = body.replaceAll("[\\r\\n]+", " ").trim();
+        if(compact.length() > 300)
+        {
+            compact = compact.substring(0, 300) + "...";
+        }
+        return "Remote API returned HTTP " + response.statusCode() + ": " + compact;
     }
 
     private void addAuthentication(HttpRequest.Builder request)
@@ -324,10 +542,19 @@ public class RemoteApiBroadcaster extends AbstractAudioBroadcaster<RemoteApiConf
     public long getLastHeartbeatAttempt() { return mLastHeartbeatAttempt; }
     public long getLastHeartbeatSuccess() { return mLastHeartbeatSuccess; }
     public String getLastHeartbeatError() { return mLastHeartbeatError; }
+    public long getLastCallAttempt() { return mLastCallAttempt; }
+    public long getLastCallSuccess() { return mLastCallSuccess; }
+    public String getLastCallError() { return mLastCallError; }
+    public long getLastContactAttempt() { return mLastContactAttempt; }
+    public long getLastContactSuccess() { return mLastContactSuccess; }
+    public long getLastReconnect() { return mLastReconnect; }
+    public int getReconnectCount() { return mReconnectCount.get(); }
+    public int getConsecutiveConnectionFailures() { return mConsecutiveConnectionFailures.get(); }
 
     private void retryOrFail(QueuedCall call, Throwable error)
     {
-        setBroadcastState(BroadcastState.TEMPORARY_BROADCAST_ERROR);
+        mLastCallError = rootMessage(error);
+        recoverConnection(mLastCallError);
         int nextAttempt = call.attempt() + 1;
         if(nextAttempt <= getBroadcastConfiguration().getMaximumRetries() && mRunning.get())
         {
