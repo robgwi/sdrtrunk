@@ -24,7 +24,9 @@ import io.github.dsheirer.audio.broadcast.BroadcastConfiguration;
 import io.github.dsheirer.audio.broadcast.BroadcastFormat;
 import io.github.dsheirer.audio.broadcast.BroadcastServerType;
 import javafx.beans.binding.Bindings;
+import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.IntegerProperty;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
@@ -39,6 +41,9 @@ public class RdioScannerConfiguration extends BroadcastConfiguration
 {
     private IntegerProperty mSystemID = new SimpleIntegerProperty();
     private StringProperty mApiKey = new SimpleStringProperty();
+    private BooleanProperty mHeartbeatEnabled = new SimpleBooleanProperty(false);
+    private IntegerProperty mHeartbeatIntervalSeconds = new SimpleIntegerProperty(60);
+    private StringProperty mHeartbeatUrl = new SimpleStringProperty();
 
     /**
      * Constructor for faster jackson
@@ -118,6 +123,61 @@ public class RdioScannerConfiguration extends BroadcastConfiguration
         mSystemID.set(systemID);
     }
 
+    @JacksonXmlProperty(isAttribute = true, localName = "heartbeat_enabled")
+    public boolean isHeartbeatEnabled()
+    {
+        return mHeartbeatEnabled.get();
+    }
+
+    public void setHeartbeatEnabled(boolean enabled)
+    {
+        mHeartbeatEnabled.set(enabled);
+    }
+
+    @JacksonXmlProperty(isAttribute = true, localName = "heartbeat_interval_seconds")
+    public int getHeartbeatIntervalSeconds()
+    {
+        return mHeartbeatIntervalSeconds.get();
+    }
+
+    public void setHeartbeatIntervalSeconds(int intervalSeconds)
+    {
+        mHeartbeatIntervalSeconds.set(Math.max(5, intervalSeconds));
+    }
+
+    @JacksonXmlProperty(isAttribute = true, localName = "heartbeat_url")
+    public String getHeartbeatUrl()
+    {
+        return mHeartbeatUrl.get();
+    }
+
+    public void setHeartbeatUrl(String heartbeatUrl)
+    {
+        mHeartbeatUrl.set(heartbeatUrl);
+    }
+
+    /** Uses an explicit heartbeat URL or derives /api/heartbeat from the configured call-upload URL. */
+    public String resolveHeartbeatUrl()
+    {
+        String heartbeatUrl = getHeartbeatUrl();
+        if(heartbeatUrl != null && !heartbeatUrl.isBlank())
+        {
+            return heartbeatUrl.trim();
+        }
+
+        String host = getHost();
+        if(host == null || host.isBlank())
+        {
+            return host;
+        }
+        host = host.trim();
+        if(host.endsWith("/api/call-upload"))
+        {
+            return host.substring(0, host.length() - "/api/call-upload".length()) + "/api/heartbeat";
+        }
+        return host.replaceAll("/+$", "") + "/api/heartbeat";
+    }
+
     @JacksonXmlProperty(isAttribute = true, localName = "type", namespace = "http://www.w3.org/2001/XMLSchema-instance")
     @Override
     public BroadcastServerType getBroadcastServerType()
@@ -129,7 +189,16 @@ public class RdioScannerConfiguration extends BroadcastConfiguration
     public BroadcastConfiguration copyOf()
     {
         RdioScannerConfiguration copy = new RdioScannerConfiguration();
+        copy.setName(getName());
+        copy.setHost(getHost());
+        copy.setEnabled(isEnabled());
+        copy.setDelay(getDelay());
+        copy.setMaximumRecordingAge(getMaximumRecordingAge());
         copy.setSystemID(getSystemID());
+        copy.setApiKey(getApiKey());
+        copy.setHeartbeatEnabled(isHeartbeatEnabled());
+        copy.setHeartbeatIntervalSeconds(getHeartbeatIntervalSeconds());
+        copy.setHeartbeatUrl(getHeartbeatUrl());
         return copy;
     }
 }

@@ -45,7 +45,7 @@ X-SDRTrunk-Event: heartbeat
   "timestamp": 1788667200000,
   "timestampIso": "2026-09-06T12:00:00Z",
   "application": "sdrtrunk",
-  "version": "0.7.0-beta-11",
+  "version": "0.7.0-beta-12",
   "destination": "Dispatch API",
   "hostname": "scanner-host",
   "uptimeMs": 86400000,

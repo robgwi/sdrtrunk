@@ -19,6 +19,7 @@
 
 package io.github.dsheirer.audio.broadcast.rdioscanner;
 
+import com.google.gson.Gson;
 import com.google.common.net.HttpHeaders;
 import io.github.dsheirer.alias.Alias;
 import io.github.dsheirer.alias.AliasList;
@@ -42,19 +43,26 @@ import io.github.dsheirer.identifier.radio.RadioIdentifier;
 import io.github.dsheirer.identifier.talkgroup.TalkgroupIdentifier;
 import io.github.dsheirer.util.ThreadPool;
 import java.io.IOException;
+import java.lang.management.ManagementFactory;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Queue;
-import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedTransferQueue;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -66,6 +74,8 @@ import org.slf4j.LoggerFactory;
 public class RdioScannerBroadcaster extends AbstractAudioBroadcaster<RdioScannerConfiguration>
 {
     private final static Logger mLog = LoggerFactory.getLogger(RdioScannerBroadcaster.class);
+    private static final Gson GSON = new Gson();
+    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(20);
 
     private static final String ENCODING_TYPE_MP3 = "mp3";
     private static final String MULTIPART_TYPE = "multipart";
@@ -73,13 +83,18 @@ public class RdioScannerBroadcaster extends AbstractAudioBroadcaster<RdioScanner
     private static final String MULTIPART_FORM_DATA = MULTIPART_TYPE + "/" + DEFAULT_SUBTYPE;
     private Queue<AudioRecording> mAudioRecordingQueue = new LinkedTransferQueue<>();
     private ScheduledFuture<?> mAudioRecordingProcessorFuture;
-    private HttpClient mHttpClient = HttpClient.newBuilder()
-        .version(HttpClient.Version.HTTP_2)
-        .followRedirects(HttpClient.Redirect.NORMAL)
-        .connectTimeout(Duration.ofSeconds(20))
-        .build();
+    private ScheduledFuture<?> mHeartbeatProcessorFuture;
+    private volatile HttpClient mHttpClient = createHttpClient();
+    private volatile CompletableFuture<HttpResponse<String>> mHeartbeatRequest;
+    private final AtomicBoolean mRunning = new AtomicBoolean();
+    private final AtomicBoolean mHeartbeatInFlight = new AtomicBoolean();
+    private final AtomicInteger mHeartbeatFailures = new AtomicInteger();
     private long mLastConnectionAttempt;
     private long mConnectionAttemptInterval = 5000; //Every 5 seconds
+    private volatile long mNextHeartbeatAttempt;
+    private volatile long mLastHeartbeatAttempt;
+    private volatile long mLastHeartbeatSuccess;
+    private volatile String mLastHeartbeatError = "";
     private AliasModel mAliasModel;
 
     /**
@@ -100,6 +115,7 @@ public class RdioScannerBroadcaster extends AbstractAudioBroadcaster<RdioScanner
     @Override
     public void start()
     {
+        mRunning.set(true);
         setBroadcastState(BroadcastState.CONNECTING);
         String response = testConnection(getBroadcastConfiguration());
         mLastConnectionAttempt = System.currentTimeMillis();
@@ -122,6 +138,13 @@ public class RdioScannerBroadcaster extends AbstractAudioBroadcaster<RdioScanner
             mAudioRecordingProcessorFuture = ThreadPool.SCHEDULED.scheduleAtFixedRate(new AudioRecordingProcessor(),
                 0, 500, TimeUnit.MILLISECONDS);
         }
+
+        if(getBroadcastConfiguration().isHeartbeatEnabled() && mHeartbeatProcessorFuture == null)
+        {
+            mNextHeartbeatAttempt = 0;
+            mHeartbeatProcessorFuture = ThreadPool.SCHEDULED.scheduleWithFixedDelay(this::monitorHeartbeat,
+                0, 1, TimeUnit.SECONDS);
+        }
     }
 
     /**
@@ -130,13 +153,26 @@ public class RdioScannerBroadcaster extends AbstractAudioBroadcaster<RdioScanner
     @Override
     public void stop()
     {
+        mRunning.set(false);
         if(mAudioRecordingProcessorFuture != null)
         {
             mAudioRecordingProcessorFuture.cancel(true);
             mAudioRecordingProcessorFuture = null;
-            dispose();
-            setBroadcastState(BroadcastState.DISCONNECTED);
         }
+        if(mHeartbeatProcessorFuture != null)
+        {
+            mHeartbeatProcessorFuture.cancel(true);
+            mHeartbeatProcessorFuture = null;
+        }
+        CompletableFuture<HttpResponse<String>> heartbeatRequest = mHeartbeatRequest;
+        if(heartbeatRequest != null)
+        {
+            heartbeatRequest.cancel(true);
+            mHeartbeatRequest = null;
+        }
+        mHeartbeatInFlight.set(false);
+        dispose();
+        setBroadcastState(BroadcastState.DISCONNECTED);
     }
 
     /**
@@ -183,6 +219,129 @@ public class RdioScannerBroadcaster extends AbstractAudioBroadcaster<RdioScanner
 
         return getBroadcastState() == BroadcastState.CONNECTED;
     }
+
+    private static HttpClient createHttpClient()
+    {
+        return HttpClient.newBuilder().version(HttpClient.Version.HTTP_2)
+            .followRedirects(HttpClient.Redirect.NORMAL).connectTimeout(REQUEST_TIMEOUT).build();
+    }
+
+    private void monitorHeartbeat()
+    {
+        if(mRunning.get() && System.currentTimeMillis() >= mNextHeartbeatAttempt)
+        {
+            sendHeartbeat();
+        }
+    }
+
+    private void sendHeartbeat()
+    {
+        if(!mRunning.get() || !mHeartbeatInFlight.compareAndSet(false, true))
+        {
+            return;
+        }
+
+        mLastHeartbeatAttempt = System.currentTimeMillis();
+        try
+        {
+            Map<String,Object> heartbeat = new LinkedHashMap<>();
+            heartbeat.put("event", "heartbeat");
+            heartbeat.put("status", "online");
+            heartbeat.put("connected", getBroadcastState() == BroadcastState.CONNECTED);
+            heartbeat.put("timestamp", mLastHeartbeatAttempt);
+            heartbeat.put("timestampIso", Instant.ofEpochMilli(mLastHeartbeatAttempt).toString());
+            heartbeat.put("application", "sdrtrunk");
+            heartbeat.put("version", applicationVersion());
+            heartbeat.put("destination", getBroadcastConfiguration().getName());
+            heartbeat.put("hostname", hostname());
+            heartbeat.put("uptimeMs", ManagementFactory.getRuntimeMXBean().getUptime());
+            heartbeat.put("systemId", getBroadcastConfiguration().getSystemID());
+            heartbeat.put("queuedCalls", getAudioQueueSize());
+
+            HttpRequest.Builder request = HttpRequest.newBuilder()
+                .uri(URI.create(getBroadcastConfiguration().resolveHeartbeatUrl()))
+                .timeout(REQUEST_TIMEOUT)
+                .header(HttpHeaders.CONTENT_TYPE, "application/json; charset=UTF-8")
+                .header(HttpHeaders.USER_AGENT, "sdrtrunk")
+                .header("X-SDRTrunk-Event", "heartbeat")
+                .header("X-RdioScanner-System-Id",
+                    Integer.toString(getBroadcastConfiguration().getSystemID()))
+                .POST(HttpRequest.BodyPublishers.ofString(GSON.toJson(heartbeat)));
+            String apiKey = getBroadcastConfiguration().getApiKey();
+            if(apiKey != null && !apiKey.isBlank())
+            {
+                request.header("X-API-Key", apiKey);
+            }
+
+            CompletableFuture<HttpResponse<String>> heartbeatRequest = mHttpClient
+                .sendAsync(request.build(), HttpResponse.BodyHandlers.ofString())
+                .orTimeout(REQUEST_TIMEOUT.toMillis() + 1_000L, TimeUnit.MILLISECONDS);
+            mHeartbeatRequest = heartbeatRequest;
+            heartbeatRequest.whenComplete(this::completeHeartbeat);
+        }
+        catch(Exception e)
+        {
+            completeHeartbeat(null, e);
+        }
+    }
+
+    private void completeHeartbeat(HttpResponse<String> response, Throwable error)
+    {
+        if(!mRunning.get())
+        {
+            mHeartbeatInFlight.set(false);
+            return;
+        }
+
+        if(error == null && response != null && response.statusCode() >= 200 && response.statusCode() < 300)
+        {
+            mLastHeartbeatSuccess = System.currentTimeMillis();
+            mLastHeartbeatError = "";
+            mHeartbeatFailures.set(0);
+            mNextHeartbeatAttempt = System.currentTimeMillis() +
+                TimeUnit.SECONDS.toMillis(getBroadcastConfiguration().getHeartbeatIntervalSeconds());
+            setBroadcastState(BroadcastState.CONNECTED);
+        }
+        else
+        {
+            mLastHeartbeatError = error != null ? rootMessage(error) :
+                "HTTP " + (response != null ? response.statusCode() : "unknown");
+            int failures = Math.min(mHeartbeatFailures.incrementAndGet(), 7);
+            long retryDelay = Math.min(TimeUnit.SECONDS.toMillis(
+                getBroadcastConfiguration().getHeartbeatIntervalSeconds()),
+                Math.min(60_000L, 1_000L << (failures - 1)));
+            mNextHeartbeatAttempt = System.currentTimeMillis() + retryDelay;
+            mHttpClient = createHttpClient();
+            setBroadcastState(BroadcastState.TEMPORARY_BROADCAST_ERROR);
+            mLog.warn("Rdio Scanner heartbeat failed for [{}]: {}",
+                getBroadcastConfiguration().getName(), mLastHeartbeatError);
+        }
+        mHeartbeatRequest = null;
+        mHeartbeatInFlight.set(false);
+    }
+
+    private static String hostname()
+    {
+        try { return InetAddress.getLocalHost().getHostName(); }
+        catch(Exception e) { return "unknown"; }
+    }
+
+    private static String applicationVersion()
+    {
+        String version = RdioScannerBroadcaster.class.getPackage().getImplementationVersion();
+        return version != null && !version.isBlank() ? version : "development";
+    }
+
+    private static String rootMessage(Throwable error)
+    {
+        Throwable cause = error;
+        while(cause.getCause() != null) { cause = cause.getCause(); }
+        return cause.getMessage() != null ? cause.getMessage() : cause.getClass().getSimpleName();
+    }
+
+    public long getLastHeartbeatAttempt() { return mLastHeartbeatAttempt; }
+    public long getLastHeartbeatSuccess() { return mLastHeartbeatSuccess; }
+    public String getLastHeartbeatError() { return mLastHeartbeatError; }
 
     @Override
     public int getAudioQueueSize()
@@ -272,35 +431,20 @@ public class RdioScannerBroadcaster extends AbstractAudioBroadcaster<RdioScanner
 
                         HttpRequest fileRequest = HttpRequest.newBuilder()
                             .uri(URI.create(getBroadcastConfiguration().getHost()))
+                            .timeout(REQUEST_TIMEOUT)
                             .header(HttpHeaders.CONTENT_TYPE, MULTIPART_FORM_DATA + "; boundary=" + bodyBuilder.getBoundary())
                             .header(HttpHeaders.USER_AGENT, "sdrtrunk")
                             .POST(bodyBuilder.build())
                             .build();
 
                         mHttpClient.sendAsync(fileRequest, HttpResponse.BodyHandlers.ofString())
+                            .orTimeout(REQUEST_TIMEOUT.toMillis() + 1_000L, TimeUnit.MILLISECONDS)
                             .whenComplete((fileResponse, throwable1) -> {
-                                if(throwable1 != null || fileResponse.statusCode() != 200)
+                                if(throwable1 != null || fileResponse == null || fileResponse.statusCode() != 200)
                                 {
-                                    if(throwable1 instanceof IOException || throwable1 instanceof CompletionException)
-                                    {
-                                        //We get socket reset exceptions occasionally when the remote server doesn't
-                                        //fully read our request and immediately responds.
-                                        setBroadcastState(BroadcastState.TEMPORARY_BROADCAST_ERROR);
-                                        mLog.error("Rdio Scanner API file upload fail [" +
-                                            fileResponse.statusCode() + "] response [" +
-                                            fileResponse.body() + "]");
-                                    }
-                                    else
-                                    {
-                                        setBroadcastState(BroadcastState.TEMPORARY_BROADCAST_ERROR);
-                                        mLog.error("Rdio Scanner API file upload fail [" +
-                                            fileResponse.statusCode() + "] response [" +
-                                            fileResponse.body() + "]");
-                                    }
-
-                                    incrementErrorAudioCount();
-                                    broadcast(new BroadcastEvent(RdioScannerBroadcaster.this,
-                                        BroadcastEvent.Event.BROADCASTER_ERROR_COUNT_CHANGE));
+                                    String message = throwable1 != null ? rootMessage(throwable1) :
+                                        "HTTP " + fileResponse.statusCode() + ": " + fileResponse.body();
+                                    retryRecording(audioRecording, message);
                                 }
                                 else
                                 {
@@ -308,6 +452,7 @@ public class RdioScannerBroadcaster extends AbstractAudioBroadcaster<RdioScanner
 
                                     if(fileResponseString.contains("Call imported successfully."))
                                     {
+                                        setBroadcastState(BroadcastState.CONNECTED);
                                         incrementStreamedAudioCount();
                                         broadcast(new BroadcastEvent(RdioScannerBroadcaster.this,
                                             BroadcastEvent.Event.BROADCASTER_STREAMED_COUNT_CHANGE)); 
@@ -316,14 +461,12 @@ public class RdioScannerBroadcaster extends AbstractAudioBroadcaster<RdioScanner
                                     else if(fileResponseString.contains("duplicate call rejected"))
                                     {
                                         //Rdio Scanner is telling us to skip audio upload - someone already uploaded it
+                                        setBroadcastState(BroadcastState.CONNECTED);
                                         audioRecording.removePendingReplay();
                                     }
                                     else
                                     {
-                                        setBroadcastState(BroadcastState.TEMPORARY_BROADCAST_ERROR);
-                                        mLog.error("Rdio Scanner API file upload fail [" +
-                                            fileResponse.statusCode() + "] response [" +
-                                            fileResponse.body() + "]");
+                                        retryRecording(audioRecording, "Unexpected response: " + fileResponseString);
                                     }
 
 
@@ -344,12 +487,14 @@ public class RdioScannerBroadcaster extends AbstractAudioBroadcaster<RdioScanner
                 }
                 catch(Exception e)
                 {
-                    mLog.error("Unknown Error", e);
-                    setBroadcastState(BroadcastState.ERROR);
-                    incrementErrorAudioCount();
-                    broadcast(new BroadcastEvent(this, BroadcastEvent.Event.BROADCASTER_ERROR_COUNT_CHANGE));
-                    audioRecording.removePendingReplay();
+                    retryRecording(audioRecording, rootMessage(e));
                 }
+            }
+            else if(audioRecording != null)
+            {
+                audioRecording.removePendingReplay();
+                incrementAgedOffAudioCount();
+                broadcast(new BroadcastEvent(this, BroadcastEvent.Event.BROADCASTER_AGED_OFF_COUNT_CHANGE));
             }
         }
 
@@ -372,6 +517,25 @@ public class RdioScannerBroadcaster extends AbstractAudioBroadcaster<RdioScanner
                 broadcast(new BroadcastEvent(this, BroadcastEvent.Event.BROADCASTER_AGED_OFF_COUNT_CHANGE));
                 audioRecording = mAudioRecordingQueue.peek();
             }
+        }
+    }
+
+    private void retryRecording(AudioRecording audioRecording, String message)
+    {
+        setBroadcastState(BroadcastState.TEMPORARY_BROADCAST_ERROR);
+        mHttpClient = createHttpClient();
+        incrementErrorAudioCount();
+        broadcast(new BroadcastEvent(this, BroadcastEvent.Event.BROADCASTER_ERROR_COUNT_CHANGE));
+        if(mRunning.get() && isValid(audioRecording))
+        {
+            mAudioRecordingQueue.offer(audioRecording);
+            broadcast(new BroadcastEvent(this, BroadcastEvent.Event.BROADCASTER_QUEUE_CHANGE));
+            mLog.warn("Rdio Scanner upload failed; recording returned to queue: {}", message);
+        }
+        else
+        {
+            audioRecording.removePendingReplay();
+            mLog.error("Rdio Scanner upload failed and recording is no longer retryable: {}", message);
         }
     }
 

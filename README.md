@@ -4,13 +4,14 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.7.0-beta-11
+## Current release: 0.7.0-beta-12
 
-- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 11](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-11)
+- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 12](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-12)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Linux x86_64 installation guide](LINUX_X86_64.md)
 - [Local Whisper setup guide](WHISPER_SETUP.md)
 - [Remote Call API and heartbeat guide](REMOTE_API.md)
+- [Rdio Scanner heartbeat integration guide](RDIO_SCANNER_HEARTBEAT.md)
 - [Upstream sdrtrunk wiki](https://github.com/DSheirer/sdrtrunk/wiki)
 
 The Raspberry Pi archive contains its own ARM64 Java and JavaFX runtime. A separate Java installation is not needed. It supports the Java desktop plus web console when launched from Raspberry Pi Desktop or VNC, and headless receiver plus web console when launched without a display or with `-Djava.awt.headless=true`.
@@ -65,6 +66,8 @@ Advanced protocol-specific decoder fields, site/channel creation, conventional a
 - Transcribe locally or use OpenAI `whisper-1`.
 - Optionally translate supported audio to English through the hosted OpenAI workflow.
 - Existing Rdio Scanner uploads continue to use `<Rdio Scanner URL>/api/call-upload`.
+- Rdio Scanner destinations can optionally POST authenticated JSON heartbeats to a derived `/api/heartbeat` endpoint
+  or a separately configured URL.
 
 ### Background scanner transcription
 
@@ -84,8 +87,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-11.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-11
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-12.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-12
 bin/sdr-trunk
 ```
 
@@ -103,6 +106,16 @@ bin/sdr-trunk
 Environment variables override saved GUI token settings. Do not commit real keys or tokens to this repository.
 
 ## Release history
+
+### 0.7.0-beta-12
+
+- Added **Send Heartbeat**, interval, and optional heartbeat URL settings to the desktop **Playlist Editor > Streaming > Rdio Scanner** editor.
+- Derives `<Rdio Scanner URL>/api/heartbeat` when a separate heartbeat URL is not configured.
+- Sends an authenticated JSON heartbeat with the Rdio system ID, destination, host, version, uptime, connection state, and queued-call count.
+- Added exponential heartbeat retry and HTTP-client replacement after network errors, timeouts, or non-2xx responses.
+- Fixed failed Rdio Scanner call uploads being removed from the queue without retrying, and added a request watchdog so a stalled upload can recover.
+- Added an integration guide and Node/Express receiver example documenting the complete heartbeat contract.
+- Added automated tests for authentication headers, heartbeat JSON, URL derivation, and configuration copying.
 
 ### 0.7.0-beta-11
 
