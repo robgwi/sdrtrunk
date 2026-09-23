@@ -19,7 +19,9 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Queue;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.Semaphore;
@@ -35,17 +37,20 @@ public class RemoteApiBroadcaster extends AbstractAudioBroadcaster<RemoteApiConf
 {
     private static final Logger mLog = LoggerFactory.getLogger(RemoteApiBroadcaster.class);
     private static final Gson GSON = new Gson();
-    private final Queue<QueuedCall> mQueue = new PriorityBlockingQueue<>(32,
-        Comparator.comparingLong(QueuedCall::nextAttempt));
+    private static final Map<Integer,PendingQueue> PENDING_QUEUES = new ConcurrentHashMap<>();
+    private final PendingQueue mPendingQueue;
+    private final Queue<QueuedCall> mQueue;
     private final Duration mRequestTimeout;
     private final Object mConnectionLock = new Object();
     private volatile HttpClient mHttpClient;
     private final Semaphore mUploadSlots;
     private final AtomicBoolean mRunning = new AtomicBoolean();
+    private final AtomicBoolean mPreserveQueueOnStop = new AtomicBoolean();
     private final AtomicBoolean mHeartbeatInFlight = new AtomicBoolean();
     private final AtomicInteger mConsecutiveConnectionFailures = new AtomicInteger();
     private final AtomicInteger mReconnectCount = new AtomicInteger();
     private final AtomicLong mHttpClientGeneration = new AtomicLong();
+    private final Set<ActiveUpload> mActiveUploads = ConcurrentHashMap.newKeySet();
     private ScheduledFuture<?> mProcessor;
     private ScheduledFuture<?> mHeartbeatProcessor;
     private volatile CompletableFuture<HttpResponse<String>> mHeartbeatRequest;
@@ -65,6 +70,8 @@ public class RemoteApiBroadcaster extends AbstractAudioBroadcaster<RemoteApiConf
     public RemoteApiBroadcaster(RemoteApiConfiguration configuration)
     {
         super(configuration);
+        mPendingQueue = PENDING_QUEUES.computeIfAbsent(configuration.getId(), ignored -> new PendingQueue());
+        mQueue = mPendingQueue.queue();
         mRequestTimeout = Duration.ofSeconds(configuration.getRequestTimeoutSeconds());
         mHttpClient = createHttpClient();
         mUploadSlots = new Semaphore(configuration.getMaximumConcurrentUploads());
@@ -91,6 +98,7 @@ public class RemoteApiBroadcaster extends AbstractAudioBroadcaster<RemoteApiConf
     {
         if(mRunning.compareAndSet(false, true))
         {
+            mPreserveQueueOnStop.set(false);
             mStarted = System.currentTimeMillis();
             mNextHeartbeatAttempt = mStarted;
             setBroadcastState(getBroadcastConfiguration().isHeartbeatEnabled() ? BroadcastState.CONNECTING :
@@ -110,6 +118,18 @@ public class RemoteApiBroadcaster extends AbstractAudioBroadcaster<RemoteApiConf
     @Override
     public void stop()
     {
+        stop(false);
+    }
+
+    /** Stops this instance while retaining queued and in-flight calls for its replacement instance. */
+    public void stopPreservingQueue()
+    {
+        stop(true);
+    }
+
+    private void stop(boolean preserveQueue)
+    {
+        mPreserveQueueOnStop.set(preserveQueue);
         mRunning.set(false);
         if(mProcessor != null)
         {
@@ -128,31 +148,91 @@ public class RemoteApiBroadcaster extends AbstractAudioBroadcaster<RemoteApiConf
             mHeartbeatRequest = null;
         }
         mHeartbeatInFlight.set(false);
-        dispose();
+        cancelActiveUploads(preserveQueue);
+        if(!preserveQueue)
+        {
+            discardQueue();
+        }
         setBroadcastState(BroadcastState.DISCONNECTED);
     }
 
     @Override
     public void dispose()
     {
-        QueuedCall call;
-        while((call = mQueue.poll()) != null)
+        if(!mPreserveQueueOnStop.get())
         {
-            call.recording().removePendingReplay();
+            discardQueue();
         }
+    }
+
+    private void discardQueue()
+    {
+        if(mPendingQueue.discard())
+        {
+            PENDING_QUEUES.remove(getBroadcastConfiguration().getId(), mPendingQueue);
+        }
+    }
+
+    /** Releases calls retained while a disabled or edited destination was waiting to restart. */
+    public static void discardPreservedQueue(int configurationId)
+    {
+        PendingQueue queue = PENDING_QUEUES.remove(configurationId);
+        if(queue != null)
+        {
+            queue.discard();
+        }
+    }
+
+    /** Returns calls retained for a disabled destination that does not currently have a broadcaster instance. */
+    public static int getPreservedQueueSize(int configurationId)
+    {
+        PendingQueue queue = PENDING_QUEUES.get(configurationId);
+        return queue != null ? queue.size() : 0;
+    }
+
+    private void cancelActiveUploads(boolean retryImmediately)
+    {
+        for(ActiveUpload activeUpload: mActiveUploads)
+        {
+            activeUpload.setRetryImmediately(retryImmediately);
+            activeUpload.future().cancel(true);
+        }
+    }
+
+    private void expediteQueuedCalls()
+    {
+        QueuedCall call;
+        long now = System.currentTimeMillis();
+        int queued = mQueue.size();
+        for(int x = 0; x < queued && (call = mQueue.poll()) != null; x++)
+        {
+            mPendingQueue.offer(new QueuedCall(call.recording(), call.attempt(), now));
+        }
+        queueChanged();
+    }
+
+    private void releaseQueuedCall(QueuedCall call)
+    {
+        call.recording().removePendingReplay();
+    }
+
+    private void requeueImmediately(QueuedCall call)
+    {
+        mPendingQueue.offer(new QueuedCall(call.recording(), call.attempt(), System.currentTimeMillis()));
     }
 
     @Override
     public int getAudioQueueSize()
     {
-        return mQueue.size() + (getBroadcastConfiguration().getMaximumConcurrentUploads() -
-            mUploadSlots.availablePermits());
+        return mQueue.size() + mActiveUploads.size();
     }
+
+    public int getActiveUploadCount() { return mActiveUploads.size(); }
 
     @Override
     public void receive(AudioRecording recording)
     {
-        mQueue.offer(new QueuedCall(recording, 0, System.currentTimeMillis()));
+        mPendingQueue.offer(new QueuedCall(recording, 0, System.currentTimeMillis()));
         queueChanged();
     }
 
@@ -170,7 +250,8 @@ public class RemoteApiBroadcaster extends AbstractAudioBroadcaster<RemoteApiConf
                 }
                 mQueue.poll();
                 queueChanged();
-                if(System.currentTimeMillis() - call.recording().getStartTime() >
+                if(!getBroadcastConfiguration().isRetryIndefinitely() &&
+                    System.currentTimeMillis() - call.recording().getStartTime() >
                     getBroadcastConfiguration().getMaximumRecordingAge())
                 {
                     call.recording().removePendingReplay();
@@ -198,11 +279,19 @@ public class RemoteApiBroadcaster extends AbstractAudioBroadcaster<RemoteApiConf
                     }
                     continue;
                 }
+                upload = upload.orTimeout(uploadWatchdogMillis(), TimeUnit.MILLISECONDS);
+                ActiveUpload activeUpload = new ActiveUpload(upload);
+                mActiveUploads.add(activeUpload);
                 upload.whenComplete((ignored, error) ->
                 {
                     try
                     {
-                        if(error == null)
+                        mActiveUploads.remove(activeUpload);
+                        if(activeUpload.retryImmediately() || (!mRunning.get() && mPreserveQueueOnStop.get()))
+                        {
+                            requeueImmediately(call);
+                        }
+                        else if(error == null)
                         {
                             connectionSucceeded();
                             incrementStreamedAudioCount();
@@ -211,7 +300,14 @@ public class RemoteApiBroadcaster extends AbstractAudioBroadcaster<RemoteApiConf
                         }
                         else
                         {
-                            retryOrFail(call, error);
+                            if(mRunning.get())
+                            {
+                                retryOrFail(call, error);
+                            }
+                            else
+                            {
+                                releaseQueuedCall(call);
+                            }
                         }
                     }
                     finally
@@ -410,6 +506,8 @@ public class RemoteApiBroadcaster extends AbstractAudioBroadcaster<RemoteApiConf
             return;
         }
 
+        cancelActiveUploads(true);
+        expediteQueuedCalls();
         rebuildHttpClient();
         mConsecutiveConnectionFailures.set(0);
         mLastHeartbeatError = "";
@@ -452,6 +550,8 @@ public class RemoteApiBroadcaster extends AbstractAudioBroadcaster<RemoteApiConf
     private void recoverConnection(String message)
     {
         mConsecutiveConnectionFailures.incrementAndGet();
+        cancelActiveUploads(true);
+        expediteQueuedCalls();
         rebuildHttpClient();
         mNextHeartbeatAttempt = 0;
         setBroadcastState(BroadcastState.CONNECTING);
@@ -481,6 +581,13 @@ public class RemoteApiBroadcaster extends AbstractAudioBroadcaster<RemoteApiConf
         int failures = Math.min(mConsecutiveConnectionFailures.get(), 6);
         long backoff = 1_000L << Math.max(0, failures - 1);
         return Math.min(heartbeatIntervalMillis(), Math.min(60_000L, backoff));
+    }
+
+    private long uploadWatchdogMillis()
+    {
+        //Covers speech processing plus the HTTP request and guarantees that a wedged future cannot consume an
+        //upload slot forever.
+        return Math.max(30_000L, mRequestTimeout.toMillis() * 2L + 5_000L);
     }
 
     public boolean isConnectionStale()
@@ -556,13 +663,19 @@ public class RemoteApiBroadcaster extends AbstractAudioBroadcaster<RemoteApiConf
         mLastCallError = rootMessage(error);
         recoverConnection(mLastCallError);
         int nextAttempt = call.attempt() + 1;
-        if(nextAttempt <= getBroadcastConfiguration().getMaximumRetries() && mRunning.get())
+        if(mRunning.get() && (getBroadcastConfiguration().isRetryIndefinitely() ||
+            nextAttempt <= getBroadcastConfiguration().getMaximumRetries()))
         {
-            long delay = Math.min(300_000L, 1_000L << Math.min(nextAttempt - 1, 18));
+            long delay = getBroadcastConfiguration().isRetryIndefinitely() &&
+                nextAttempt > getBroadcastConfiguration().getMaximumRetries() ? 300_000L :
+                Math.min(300_000L, 1_000L << Math.min(nextAttempt - 1, 18));
             long jitter = (long)(Math.random() * Math.max(1, delay / 4));
-            mQueue.offer(new QueuedCall(call.recording(), nextAttempt, System.currentTimeMillis() + delay + jitter));
-            mLog.warn("Remote call upload failed; retry {}/{} scheduled: {}", nextAttempt,
-                getBroadcastConfiguration().getMaximumRetries(), error.getMessage());
+            mPendingQueue.offer(new QueuedCall(call.recording(), nextAttempt,
+                System.currentTimeMillis() + delay + jitter));
+            String retryLimit = getBroadcastConfiguration().isRetryIndefinitely() ? "unlimited" :
+                Integer.toString(getBroadcastConfiguration().getMaximumRetries());
+            mLog.warn("Remote call upload failed; retry {}/{} scheduled: {}", nextAttempt, retryLimit,
+                rootMessage(error));
         }
         else
         {
@@ -579,4 +692,54 @@ public class RemoteApiBroadcaster extends AbstractAudioBroadcaster<RemoteApiConf
     }
 
     private record QueuedCall(AudioRecording recording, int attempt, long nextAttempt) {}
+
+    private static class ActiveUpload
+    {
+        private final CompletableFuture<Void> mFuture;
+        private final AtomicBoolean mRetryImmediately = new AtomicBoolean();
+
+        private ActiveUpload(CompletableFuture<Void> future)
+        {
+            mFuture = future;
+        }
+
+        private CompletableFuture<Void> future() { return mFuture; }
+        private boolean retryImmediately() { return mRetryImmediately.get(); }
+        private void setRetryImmediately(boolean value) { mRetryImmediately.set(value); }
+    }
+
+    private static class PendingQueue
+    {
+        private final Queue<QueuedCall> mQueue = new PriorityBlockingQueue<>(32,
+            Comparator.comparingLong(QueuedCall::nextAttempt));
+        private final AtomicBoolean mDiscarded = new AtomicBoolean();
+
+        private Queue<QueuedCall> queue() { return mQueue; }
+        private int size() { return mQueue.size(); }
+
+        private synchronized boolean offer(QueuedCall call)
+        {
+            if(mDiscarded.get())
+            {
+                call.recording().removePendingReplay();
+                return false;
+            }
+            mQueue.offer(call);
+            return true;
+        }
+
+        private synchronized boolean discard()
+        {
+            if(!mDiscarded.compareAndSet(false, true))
+            {
+                return false;
+            }
+            QueuedCall call;
+            while((call = mQueue.poll()) != null)
+            {
+                call.recording().removePendingReplay();
+            }
+            return true;
+        }
+    }
 }

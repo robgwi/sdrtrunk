@@ -5,17 +5,24 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.sun.net.httpserver.HttpServer;
+import io.github.dsheirer.audio.broadcast.AudioRecording;
 import io.github.dsheirer.audio.broadcast.BroadcastState;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.util.Collections;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class RemoteApiBroadcasterTest
 {
+    @TempDir
+    Path mTemporaryDirectory;
+
     @Test
     void sendsAuthenticatedHeartbeatAndMarksConnectionOnline() throws Exception
     {
@@ -131,5 +138,39 @@ class RemoteApiBroadcasterTest
 
         assertTrue(copy.isHeartbeatEnabled());
         assertEquals(45, copy.getHeartbeatIntervalSeconds());
+    }
+
+    @Test
+    void preservesQueuedCallsAcrossDestinationRestart()
+    {
+        RemoteApiConfiguration configuration = new RemoteApiConfiguration();
+        configuration.setName("Queue Preservation Test");
+        configuration.setHost("http://127.0.0.1/calls");
+        AudioRecording recording = new AudioRecording(mTemporaryDirectory.resolve("call.mp3"),
+            Collections.emptyList(), null, System.currentTimeMillis(), 1_000L);
+        recording.addPendingReplay();
+
+        RemoteApiBroadcaster first = new RemoteApiBroadcaster(configuration);
+        first.receive(recording);
+        assertEquals(1, first.getAudioQueueSize());
+        first.stopPreservingQueue();
+
+        RemoteApiBroadcaster replacement = new RemoteApiBroadcaster(configuration);
+        assertEquals(1, replacement.getAudioQueueSize());
+        assertTrue(recording.hasPendingReplays());
+
+        replacement.stop();
+        assertFalse(recording.hasPendingReplays());
+    }
+
+    @Test
+    void continuouslyRetriesByDefaultAndCopiesSetting()
+    {
+        RemoteApiConfiguration configuration = new RemoteApiConfiguration();
+        assertTrue(configuration.isRetryIndefinitely());
+        configuration.setRetryIndefinitely(false);
+
+        RemoteApiConfiguration copy = (RemoteApiConfiguration)configuration.copyOf();
+        assertFalse(copy.isRetryIndefinitely());
     }
 }

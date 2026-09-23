@@ -15,6 +15,9 @@ Open the web console and select **Remote Calls > Add Destination**. Configure:
 - **Authentication header/prefix:** defaults to `Authorization` and `Bearer `.
 - **Send heartbeat:** enables or disables online heartbeats for this destination.
 - **Heartbeat interval seconds:** how often to send, with a minimum of 5 seconds and a default of 60 seconds.
+- **Keep retrying queued calls:** enabled by default. Failed calls remain queued and retry with bounded backoff until
+  they upload successfully or the destination is deleted. When disabled, the retry count and maximum call age use the
+  previous discard behavior.
 
 Save the destination, then assign it to talkgroups under **Playlist > Talkgroups & Aliases**.
 
@@ -42,7 +45,7 @@ X-SDRTrunk-Event: heartbeat
   "timestamp": 1788667200000,
   "timestampIso": "2026-09-06T12:00:00Z",
   "application": "sdrtrunk",
-  "version": "0.7.0-beta-10",
+  "version": "0.7.0-beta-11",
   "destination": "Dispatch API",
   "hostname": "scanner-host",
   "uptimeMs": 86400000,
@@ -56,12 +59,19 @@ response changes the state to **Connecting**, discards the current pooled HTTP c
 exponential backoff. Healthy heartbeats continue at the configured interval. The Remote Calls window shows the last
 successful contact, HTTP error details, recovery count, and a manual **Reconnect** action.
 
+A completed-call watchdog also covers the combined speech-processing and upload operation. If that operation stops
+making progress, sdrtrunk cancels it, rebuilds the HTTP client, returns the call to the queue, and continues retrying.
+The manual **Reconnect** action performs the same immediate requeue for every active upload.
+
 Turning the heartbeat off stops heartbeat requests but does not disable call uploads. Disabling the entire destination
-stops both calls and heartbeats.
+stops both calls and heartbeats. Disabling, editing, or re-enabling a destination retains its existing queued calls in
+memory; deleting the destination intentionally releases them. A full application exit cannot preserve an in-memory
+queue, so avoid shutting down while Remote Calls shows queued items.
 
 An idle HTTP destination cannot be health-checked when heartbeat is disabled. Enable heartbeat for continuous stale
 connection detection. With heartbeat disabled, a failed completed-call upload still rebuilds the HTTP connection and
-uses the configured call retry policy.
+uses the configured call retry policy. With **Keep retrying queued calls** enabled, the delay increases up to five
+minutes during a prolonged outage and delivery continues automatically after the endpoint returns.
 
 ## Completed-call request
 

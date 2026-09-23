@@ -4,9 +4,9 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.7.0-beta-10
+## Current release: 0.7.0-beta-11
 
-- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 10](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-10)
+- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 11](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-11)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Linux x86_64 installation guide](LINUX_X86_64.md)
 - [Local Whisper setup guide](WHISPER_SETUP.md)
@@ -84,8 +84,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-10.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-10
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-11.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-11
 bin/sdr-trunk
 ```
 
@@ -103,6 +103,16 @@ bin/sdr-trunk
 Environment variables override saved GUI token settings. Do not commit real keys or tokens to this repository.
 
 ## Release history
+
+### 0.7.0-beta-11
+
+- Fixed Remote Call API destinations that could remain stuck in **Connecting** with upload worker slots permanently occupied.
+- Added a completed-call upload watchdog that cancels stalled speech/HTTP work, rebuilds the connection, and returns the call to the queue.
+- Made automatic and manual reconnect retry active calls immediately instead of waiting on a stale request or its previous backoff timer.
+- Preserves queued and in-flight calls when a Remote API destination is edited, disabled, re-enabled, or internally restarted; only deleting the destination releases its retained queue.
+- Added **Keep retrying queued calls**, enabled by default, so a temporary outage no longer discards calls after the former retry or maximum-age limits. Backoff is capped at five minutes.
+- Expanded Remote Calls status with queued and actively sending counts.
+- Added automated coverage for queue preservation across a destination restart and the continuous-retry configuration.
 
 ### 0.7.0-beta-10
 

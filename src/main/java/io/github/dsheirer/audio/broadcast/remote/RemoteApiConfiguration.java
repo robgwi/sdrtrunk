@@ -39,6 +39,7 @@ public class RemoteApiConfiguration extends BroadcastConfiguration
     private final IntegerProperty mMaximumRetries = new SimpleIntegerProperty(5);
     private final IntegerProperty mMaximumConcurrentUploads = new SimpleIntegerProperty(2);
     private final IntegerProperty mRequestTimeoutSeconds = new SimpleIntegerProperty(60);
+    private final BooleanProperty mRetryIndefinitely = new SimpleBooleanProperty(true);
     private final BooleanProperty mHeartbeatEnabled = new SimpleBooleanProperty(false);
     private final IntegerProperty mHeartbeatIntervalSeconds = new SimpleIntegerProperty(60);
     private final BooleanProperty mOpenAiEnabled = new SimpleBooleanProperty(false);
@@ -88,6 +89,10 @@ public class RemoteApiConfiguration extends BroadcastConfiguration
     @JacksonXmlProperty(isAttribute = true, localName = "request_timeout_seconds")
     public int getRequestTimeoutSeconds() { return mRequestTimeoutSeconds.get(); }
     public void setRequestTimeoutSeconds(int value) { mRequestTimeoutSeconds.set(Math.max(1, value)); }
+
+    @JacksonXmlProperty(isAttribute = true, localName = "retry_indefinitely")
+    public boolean isRetryIndefinitely() { return mRetryIndefinitely.get(); }
+    public void setRetryIndefinitely(boolean value) { mRetryIndefinitely.set(value); }
 
     @JacksonXmlProperty(isAttribute = true, localName = "heartbeat_enabled")
     public boolean isHeartbeatEnabled() { return mHeartbeatEnabled.get(); }
@@ -145,6 +150,7 @@ public class RemoteApiConfiguration extends BroadcastConfiguration
         copy.setMaximumRetries(getMaximumRetries());
         copy.setMaximumConcurrentUploads(getMaximumConcurrentUploads());
         copy.setRequestTimeoutSeconds(getRequestTimeoutSeconds());
+        copy.setRetryIndefinitely(isRetryIndefinitely());
         copy.setHeartbeatEnabled(isHeartbeatEnabled());
         copy.setHeartbeatIntervalSeconds(getHeartbeatIntervalSeconds());
         copy.setOpenAiEnabled(isOpenAiEnabled());
