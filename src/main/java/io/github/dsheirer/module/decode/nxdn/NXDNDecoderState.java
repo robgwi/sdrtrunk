@@ -259,7 +259,9 @@ public class NXDNDecoderState extends DecoderState
                             "VOICE CALL REQUEST - RESPONSE:" + vcr.getCause().toString());
                 }
                 break;
+            case TRAFFIC_IN_01_CC_VOICE_CALL:
             case TRAFFIC_OUT_01_CC_VOICE_CALL:
+            case TYPE_D_IN_01_CC_VOICE_CALL:
             case TYPE_D_OUT_01_CC_VOICE_CALL:
                 if(layer3 instanceof VoiceCall vc)
                 {
@@ -289,7 +291,9 @@ public class NXDNDecoderState extends DecoderState
                             "CALL CONNECTION REQUEST - RESPONSE:" + vccr.getCause().toString());
                 }
                 break;
+            case TRAFFIC_IN_03_CC_VOICE_CALL_INITIALIZATION_VECTOR:
             case TRAFFIC_OUT_03_CC_VOICE_CALL_INITIALIZATION_VECTOR:
+            case TYPE_D_IN_03_CC_VOICE_CALL_INITIALIZATION_VECTOR:
             case TYPE_D_OUT_03_CC_VOICE_CALL_INITIALIZATION_VECTOR:
                 state = State.CALL;
                 event = DecoderStateEvent.Event.CONTINUATION;
@@ -319,7 +323,9 @@ public class NXDNDecoderState extends DecoderState
                 }
                 break;
             case TRAFFIC_OUT_07_CC_TRANSMISSION_RELEASE_EXTENSION:
+            case TRAFFIC_IN_08_CC_TRANSMISSION_RELEASE:
             case TRAFFIC_OUT_08_CC_TRANSMISSION_RELEASE:
+            case TYPE_D_IN_08_CC_TRANSMISSION_RELEASE:
             case TYPE_D_OUT_08_CC_TRANSMISSION_RELEASE:
                 mTrafficChannelManager.processEndCall(getCurrentChannel(), layer3.getTimestamp());
                 mEncryptedCallStateDetermined = false;
@@ -654,14 +660,9 @@ public class NXDNDecoderState extends DecoderState
                 }
                 break;
 
-            case TRAFFIC_IN_01_CC_VOICE_CALL:
-                state = State.CALL;
-                break;
             case TRAFFIC_IN_02_CC_VOICE_CALL_RECEPTION_RESPONSE:
-            case TRAFFIC_IN_03_CC_VOICE_CALL_INITIALIZATION_VECTOR:
                 state = State.CALL;
                 break;
-            case TRAFFIC_IN_08_CC_TRANSMISSION_RELEASE:
             case TRAFFIC_IN_09_CC_DATA_CALL_HEADER:
                 state = State.DATA;
                 break;

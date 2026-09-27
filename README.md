@@ -4,9 +4,9 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.7.0-beta-12
+## Current release: 0.7.0-beta-13
 
-- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 12](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-12)
+- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 13](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-13)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Linux x86_64 installation guide](LINUX_X86_64.md)
 - [Local Whisper setup guide](WHISPER_SETUP.md)
@@ -87,8 +87,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-12.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-12
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-13.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-13
 bin/sdr-trunk
 ```
 
@@ -106,6 +106,13 @@ bin/sdr-trunk
 Environment variables override saved GUI token settings. Do not commit real keys or tokens to this repository.
 
 ## Release history
+
+### 0.7.0-beta-13
+
+- Fixed NXDN conventional simplex/direct radio-to-radio calls not triggering alias-based audio recording.
+- Processes inbound NXDN voice-call headers the same as repeater/outbound headers so source radio, destination radio or talkgroup, and encryption identifiers reach the audio recorder.
+- Added inbound Type-D voice-call handling for the same identifier and recording path.
+- Fixed inbound NXDN transmission-release messages being classified as data instead of cleanly ending the active call.
 
 ### 0.7.0-beta-12
 
