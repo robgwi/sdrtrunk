@@ -41,6 +41,7 @@ public class DecodeConfigNXDN extends DecodeConfiguration
     private int mTrafficChannelPoolSize = TRAFFIC_CHANNEL_LIMIT_DEFAULT;
     private boolean mIgnoreDataCalls = false;
     private boolean mIgnoreEncryptedCalls = false;
+    private boolean mRecordUnknownSimplexCalls = false;
 
     private static final ChannelSpecification CHANNEL_4800 = new ChannelSpecification(12000.0, 6250, 3000.0, 3125.0);
     private static final ChannelSpecification CHANNEL_9600 = new ChannelSpecification(24000.0, 12500, 5200.0, 6250.0);
@@ -137,6 +138,23 @@ public class DecodeConfigNXDN extends DecodeConfiguration
     public void setIgnoreEncryptedCalls(boolean ignore)
     {
         mIgnoreEncryptedCalls = ignore;
+    }
+
+    /**
+     * Indicates if conventional inbound/simplex calls containing an unaliased radio ID should be recorded.
+     */
+    @JacksonXmlProperty(isAttribute = true, localName = "record_unknown_simplex_calls")
+    public boolean isRecordUnknownSimplexCalls()
+    {
+        return mRecordUnknownSimplexCalls;
+    }
+
+    /**
+     * Enables recording for conventional inbound/simplex calls containing an unaliased radio ID.
+     */
+    public void setRecordUnknownSimplexCalls(boolean record)
+    {
+        mRecordUnknownSimplexCalls = record;
     }
 
     /**

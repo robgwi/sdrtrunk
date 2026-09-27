@@ -93,6 +93,7 @@ public class NXDNConfigurationEditor extends ChannelConfigurationEditor
     private ComboBox<Encoding> mEncodingComboBox;
     private ToggleSwitch mIgnoreDataCallsToggle;
     private ToggleSwitch mIgnoreEncryptedCallsToggle;
+    private ToggleSwitch mRecordUnknownSimplexCallsToggle;
 
     /**
      * Constructs an instance
@@ -176,6 +177,14 @@ public class NXDNConfigurationEditor extends ChannelConfigurationEditor
 
             GridPane.setConstraints(getIgnoreEncryptedCallsToggle(), 2, row, 2, 1);
             gridPane.getChildren().add(getIgnoreEncryptedCallsToggle());
+
+            Label recordLabel = new Label("Record:");
+            GridPane.setHalignment(recordLabel, HPos.RIGHT);
+            GridPane.setConstraints(recordLabel, 0, ++row);
+            gridPane.getChildren().add(recordLabel);
+
+            GridPane.setConstraints(getRecordUnknownSimplexCallsToggle(), 1, row, 4, 1);
+            gridPane.getChildren().add(getRecordUnknownSimplexCallsToggle());
 
             Label channelMapTableLabel = new Label("Optional Channel Number (LCN) to Frequency Map for Channel-Mode systems.  Ignore for Direct Frequency Access (DFA) systems.");
             GridPane.setHalignment(channelMapTableLabel, HPos.LEFT);
@@ -534,6 +543,24 @@ public class NXDNConfigurationEditor extends ChannelConfigurationEditor
     }
 
     /**
+     * Toggle switch for recording conventional simplex calls containing unaliased radio IDs.
+     */
+    private ToggleSwitch getRecordUnknownSimplexCallsToggle()
+    {
+        if(mRecordUnknownSimplexCallsToggle == null)
+        {
+            mRecordUnknownSimplexCallsToggle = new ToggleSwitch("Unknown Simplex Radio IDs");
+            mRecordUnknownSimplexCallsToggle.setDisable(true);
+            mRecordUnknownSimplexCallsToggle.setTooltip(new Tooltip(
+                "Record inbound NXDN conventional/simplex calls when a source or destination radio ID has no alias"));
+            mRecordUnknownSimplexCallsToggle.selectedProperty()
+                .addListener((o, ov, nv) -> modifiedProperty().set(true));
+        }
+
+        return mRecordUnknownSimplexCallsToggle;
+    }
+
+    /**
      * Channel rotation monitor delay value.  This dictates how long the decoder will remain on each frequency before
      * rotating to the next frequency in the list
      * @return spinner
@@ -592,6 +619,7 @@ public class NXDNConfigurationEditor extends ChannelConfigurationEditor
         getChannelRotationDelaySpinner().setDisable(config == null);
         getIgnoreDataCallsToggle().setDisable(config == null);
         getIgnoreEncryptedCallsToggle().setDisable(config == null);
+        getRecordUnknownSimplexCallsToggle().setDisable(config == null);
 
         if(config instanceof DecodeConfigNXDN configNXDN)
         {
@@ -612,6 +640,7 @@ public class NXDNConfigurationEditor extends ChannelConfigurationEditor
 
             getIgnoreDataCallsToggle().setSelected(configNXDN.isIgnoreDataCalls());
             getIgnoreEncryptedCallsToggle().setSelected(configNXDN.isIgnoreEncryptedCalls());
+            getRecordUnknownSimplexCallsToggle().setSelected(configNXDN.isRecordUnknownSimplexCalls());
         }
         else
         {
@@ -619,6 +648,7 @@ public class NXDNConfigurationEditor extends ChannelConfigurationEditor
             getChannelRotationDelaySpinner().getValueFactory().setValue(200);
             getIgnoreDataCallsToggle().setSelected(false);
             getIgnoreEncryptedCallsToggle().setSelected(false);
+            getRecordUnknownSimplexCallsToggle().setSelected(false);
         }
     }
 
@@ -651,6 +681,7 @@ public class NXDNConfigurationEditor extends ChannelConfigurationEditor
         config.setChannelMap(channelFrequencies);
         config.setIgnoreDataCalls(getIgnoreDataCallsToggle().isSelected());
         config.setIgnoreEncryptedCalls(getIgnoreEncryptedCallsToggle().isSelected());
+        config.setRecordUnknownSimplexCalls(getRecordUnknownSimplexCallsToggle().isSelected());
         getItem().setDecodeConfiguration(config);
     }
 

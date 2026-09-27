@@ -4,9 +4,9 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.7.0-beta-13
+## Current release: 0.7.0-beta-14
 
-- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 13](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-13)
+- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 14](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-14)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Linux x86_64 installation guide](LINUX_X86_64.md)
 - [Local Whisper setup guide](WHISPER_SETUP.md)
@@ -56,6 +56,7 @@ Advanced protocol-specific decoder fields, site/channel creation, conventional a
 - Change an existing channel protocol without deleting and recreating the channel.
 - Choose a protocol while cloning a channel.
 - Preserve general channel settings while resetting incompatible protocol-specific decoder options.
+- Enable **Record Unknown Simplex Radio IDs** on an NXDN channel to record inbound direct calls when either radio ID has no alias.
 - Manage the web access token and restart the embedded web server from **Playlist Editor > Web Interface**.
 
 ### Remote call API and transcription
@@ -87,8 +88,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-13.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-13
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-14.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-14
 bin/sdr-trunk
 ```
 
@@ -106,6 +107,14 @@ bin/sdr-trunk
 Environment variables override saved GUI token settings. Do not commit real keys or tokens to this repository.
 
 ## Release history
+
+### 0.7.0-beta-14
+
+- Added a per-channel **Record Unknown Simplex Radio IDs** option for NXDN conventional channels in both the desktop Playlist Editor and web channel editor.
+- Records an inbound NXDN simplex/direct call when either its source or destination radio ID has no matching alias.
+- Leaves known-radio recording under the existing alias **Record Audio** setting and does not apply the fallback to repeater/outbound calls.
+- Preserves the new setting, along with the existing NXDN ignore-call and talker-alias encoding settings, when cloning a channel.
+- Added regression coverage for unknown, partially known, fully known, and repeater/outbound radio pairs.
 
 ### 0.7.0-beta-13
 

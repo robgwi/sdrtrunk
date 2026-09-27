@@ -494,7 +494,7 @@ public class DecoderFactory
             }
 
             modules.add(new NXDNDecoder(configNXDN));
-            modules.add(new NXDNAudioModule(userPreferences, aliasList));
+            modules.add(new NXDNAudioModule(userPreferences, aliasList, configNXDN.isRecordUnknownSimplexCalls()));
 
             if(channel.getChannelType() == ChannelType.STANDARD)
             {
@@ -836,6 +836,10 @@ public class DecoderFactory
                     copyNXDN.setChannelMap(origNXDN.getChannelMap());
                     copyNXDN.setTransmissionMode(origNXDN.getTransmissionMode());
                     copyNXDN.setTrafficChannelPoolSize(origNXDN.getTrafficChannelPoolSize());
+                    copyNXDN.setIgnoreDataCalls(origNXDN.isIgnoreDataCalls());
+                    copyNXDN.setIgnoreEncryptedCalls(origNXDN.isIgnoreEncryptedCalls());
+                    copyNXDN.setEncoding(origNXDN.getEncoding());
+                    copyNXDN.setRecordUnknownSimplexCalls(origNXDN.isRecordUnknownSimplexCalls());
                     return copyNXDN;
                 case P25_PHASE1:
                     DecodeConfigP25Phase1 originalP25 = (DecodeConfigP25Phase1)config;
