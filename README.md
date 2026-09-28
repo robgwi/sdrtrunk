@@ -4,9 +4,9 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.7.0-beta-15
+## Current release: 0.7.0-beta-16
 
-- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 15](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-15)
+- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 16](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-16)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Linux x86_64 installation guide](LINUX_X86_64.md)
 - [Local Whisper setup guide](WHISPER_SETUP.md)
@@ -48,9 +48,10 @@ The web channel and talkgroup editor can:
 - Edit talkgroup name, category, protocol, numeric ID, recording flag, and playback priority.
 - Select the Remote Calls destinations that receive each talkgroup, using the same alias routing model as the desktop app.
 - Add, edit, enable, disable, and delete Remote Call API destinations, including authentication, heartbeat, retry, timeout, hosted Whisper, local Whisper, and translation settings.
+- Configure NBFM bandwidth, assigned talkgroup, CTCSS/DCS squelch code, de-emphasis, high-pass filtering, and automatic level control.
 - Include the configured talkgroup alias in saved audio filenames for easier browsing and identification.
 
-Advanced protocol-specific decoder fields, site/channel creation, conventional agency-frequency imports, and non-talkgroup alias identifier types still use the Java desktop Playlist Editor. The web RadioReference workflow now mirrors the desktop trunked-talkgroup import path.
+Other advanced protocol-specific decoder fields, site/channel creation, conventional agency-frequency imports, and non-talkgroup alias identifier types still use the Java desktop Playlist Editor. The web RadioReference workflow now mirrors the desktop trunked-talkgroup import path.
 
 ### Desktop Playlist Editor improvements
 
@@ -89,8 +90,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-15.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-15
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-16.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-16
 bin/sdr-trunk
 ```
 
@@ -108,6 +109,16 @@ bin/sdr-trunk
 Environment variables override saved GUI token settings. Do not commit real keys or tokens to this repository.
 
 ## Release history
+
+### 0.7.0-beta-16
+
+- Integrated six reviewed official sdrtrunk updates without removing the fork's web console, Remote API recovery, Rdio Scanner heartbeat, transcription, packaging, or NXDN simplex-recording changes.
+- Added NBFM channel-level CTCSS/DCS squelch filtering, selectable de-emphasis, high-pass audio filtering, automatic level control, and tone activity reporting.
+- Added matching NBFM controls to the web Playlist Channel editor, including bandwidth, assigned talkgroup, tone type/code, de-emphasis, high-pass filtering, and automatic level control.
+- Preserves all new NBFM settings when a channel is cloned, including an independent copy of its squelch configuration.
+- Added Broadcastify duplicate-rejection counts to the desktop streaming table and web System window.
+- Fixed P25 Phase 1 invalid frequency-band contamination, P25 Phase 2 I-ISCH fallback decoding, MDC1200 emergency summaries, and Icecast 2.5 HTTP PUT connections.
+- Added focused regression coverage for NBFM cloning, web configuration, invalid tone rejection, NXDN unknown-radio recording, and Remote API queue recovery.
 
 ### 0.7.0-beta-15
 

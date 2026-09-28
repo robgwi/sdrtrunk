@@ -105,6 +105,7 @@ import io.github.dsheirer.module.decode.passport.DecodeConfigPassport;
 import io.github.dsheirer.module.decode.passport.PassportDecoder;
 import io.github.dsheirer.module.decode.passport.PassportDecoderState;
 import io.github.dsheirer.module.decode.passport.PassportMessageFilter;
+import io.github.dsheirer.module.decode.squelch.SquelchDecoderConfig;
 import io.github.dsheirer.module.decode.tait.Tait1200Decoder;
 import io.github.dsheirer.module.decode.tait.Tait1200DecoderState;
 import io.github.dsheirer.module.decode.tait.Tait1200MessageFilter;
@@ -849,11 +850,20 @@ public class DecoderFactory
                     DecodeConfigNBFM origNBFM = (DecodeConfigNBFM)config;
                     DecodeConfigNBFM copyNBFM = new DecodeConfigNBFM();
                     copyNBFM.setAudioFilter(origNBFM.isAudioFilter());
+                    copyNBFM.setAudioALC(origNBFM.isAudioALC());
                     copyNBFM.setBandwidth(origNBFM.getBandwidth());
+                    copyNBFM.setDeemphasis(origNBFM.getDeemphasis());
                     copyNBFM.setSquelchHysteresisCloseThreshold(origNBFM.getSquelchHysteresisCloseThreshold());
                     copyNBFM.setSquelchHysteresisOpenThreshold(origNBFM.getSquelchHysteresisOpenThreshold());
                     copyNBFM.setSquelchNoiseOpenThreshold(origNBFM.getSquelchNoiseOpenThreshold());
                     copyNBFM.setSquelchNoiseCloseThreshold(origNBFM.getSquelchNoiseCloseThreshold());
+                    List<SquelchDecoderConfig> squelchDecoderCopies = new ArrayList<>();
+                    for(SquelchDecoderConfig squelchDecoder: origNBFM.getSquelchDecoders())
+                    {
+                        squelchDecoderCopies.add(new SquelchDecoderConfig(squelchDecoder.getSquelchType(),
+                            squelchDecoder.getValue()));
+                    }
+                    copyNBFM.setSquelchDecoders(squelchDecoderCopies);
                     copyNBFM.setTalkgroup(origNBFM.getTalkgroup());
                     return copyNBFM;
                 case NXDN:
