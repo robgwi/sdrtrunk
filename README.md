@@ -4,14 +4,15 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.7.0-beta-14
+## Current release: 0.7.0-beta-15
 
-- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 14](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-14)
+- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 15](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-15)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Linux x86_64 installation guide](LINUX_X86_64.md)
 - [Local Whisper setup guide](WHISPER_SETUP.md)
 - [Remote Call API and heartbeat guide](REMOTE_API.md)
 - [Rdio Scanner heartbeat integration guide](RDIO_SCANNER_HEARTBEAT.md)
+- [Official project update and integration guide](UPSTREAM_SYNC.md)
 - [Upstream sdrtrunk wiki](https://github.com/DSheirer/sdrtrunk/wiki)
 
 The Raspberry Pi archive contains its own ARM64 Java and JavaFX runtime. A separate Java installation is not needed. It supports the Java desktop plus web console when launched from Raspberry Pi Desktop or VNC, and headless receiver plus web console when launched without a display or with `-Djava.awt.headless=true`.
@@ -88,8 +89,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-14.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-14
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-15.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-15
 bin/sdr-trunk
 ```
 
@@ -107,6 +108,14 @@ bin/sdr-trunk
 Environment variables override saved GUI token settings. Do not commit real keys or tokens to this repository.
 
 ## Release history
+
+### 0.7.0-beta-15
+
+- Added the official `DSheirer/sdrtrunk` repository as the documented read-only `upstream` source for this fork.
+- Added a weekly and manually runnable GitHub Actions review that detects new official commits without merging them automatically.
+- Generates a downloadable comparison report containing the common baseline, commit counts, official commits, upstream-changed files, and files modified by both projects.
+- Creates or updates one GitHub review issue while official changes are pending and closes it after they are integrated.
+- Added a safe integration guide covering isolated branches, regression tests, dual-architecture builds, manual feature checks, and playlist backups.
 
 ### 0.7.0-beta-14
 
