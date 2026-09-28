@@ -40,7 +40,12 @@ import io.github.dsheirer.controller.channel.ChannelProcessingManager;
 import io.github.dsheirer.controller.channel.ChannelEvent;
 import io.github.dsheirer.module.decode.DecoderFactory;
 import io.github.dsheirer.module.decode.DecoderType;
+import io.github.dsheirer.module.decode.nbfm.DecodeConfigNBFM;
+import io.github.dsheirer.module.decode.nbfm.DeemphasisMode;
 import io.github.dsheirer.module.decode.nxdn.DecodeConfigNXDN;
+import io.github.dsheirer.module.decode.squelch.SquelchDecoderConfig;
+import io.github.dsheirer.module.decode.squelch.ctcss.CTCSSCode;
+import io.github.dsheirer.module.decode.squelch.dcs.DCSCode;
 import io.github.dsheirer.source.config.SourceConfigTuner;
 import io.github.dsheirer.monitor.ResourceMonitor;
 import io.github.dsheirer.protocol.Protocol;
@@ -145,6 +150,7 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         mServer.createContext("/api/v1/health", exchange -> json(exchange, 200, Map.of("status", "ok")));
         mServer.createContext("/api/v1/status", authenticated(this::status));
         mServer.createContext("/api/v1/channels", authenticated(this::channels));
+        mServer.createContext("/api/v1/channel-options", authenticated(this::channelOptions));
         mServer.createContext("/api/v1/talkgroups", authenticated(this::talkgroups));
         mServer.createContext("/api/v1/tuners", authenticated(this::tuners));
         mServer.createContext("/api/v1/broadcasters", authenticated(this::broadcasters));
@@ -259,6 +265,19 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
             channel.getDecodeConfiguration().getDecoderType().name() : null);
         value.put("recordUnknownSimplexCalls", channel.getDecodeConfiguration() instanceof DecodeConfigNXDN nxdn &&
             nxdn.isRecordUnknownSimplexCalls());
+        if(channel.getDecodeConfiguration() instanceof DecodeConfigNBFM nbfm)
+        {
+            value.put("nbfmBandwidth", nbfm.getBandwidth().name());
+            value.put("nbfmTalkgroup", nbfm.getTalkgroup());
+            value.put("nbfmAudioFilter", nbfm.isAudioFilter());
+            value.put("nbfmAudioALC", nbfm.isAudioALC());
+            value.put("nbfmDeemphasis", nbfm.getDeemphasis().name());
+            SquelchDecoderConfig squelch = nbfm.getSquelchDecoders().isEmpty() ? null :
+                nbfm.getSquelchDecoders().getFirst();
+            value.put("nbfmSquelchType", squelch != null ? squelch.getSquelchType().name() :
+                SquelchDecoderConfig.SquelchType.NONE.name());
+            value.put("nbfmSquelchValue", squelch != null ? squelch.getValue() : "");
+        }
         value.put("source", channel.getSourceConfiguration() != null ?
             channel.getSourceConfiguration().toString() : null);
         if(channel.getSourceConfiguration() instanceof SourceConfigTuner tunerSource)
@@ -282,7 +301,15 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
             DecoderType decoder = decoderValue(request);
             channel = new Channel(stringValue(request, "name", "New Channel"));
             channel.setDecodeConfiguration(DecoderFactory.getDecodeConfiguration(decoder));
-            updateChannelFields(channel, request, false);
+            try
+            {
+                updateChannelFields(channel, request, false);
+            }
+            catch(IllegalArgumentException e)
+            {
+                json(exchange, 400, Map.of("error", e.getMessage()));
+                return;
+            }
             mPlaylistManager.getChannelModel().addChannel(channel);
             json(exchange, 201, channelMap(channel));
             return;
@@ -296,7 +323,15 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
             json(exchange, 200, Map.of("deleted", id));
             return;
         }
-        updateChannelFields(channel, request, true);
+        try
+        {
+            updateChannelFields(channel, request, true);
+        }
+        catch(IllegalArgumentException e)
+        {
+            json(exchange, 400, Map.of("error", e.getMessage()));
+            return;
+        }
         mPlaylistManager.getChannelModel().receive(new ChannelEvent(channel,
             ChannelEvent.Event.NOTIFICATION_CONFIGURATION_CHANGE));
         json(exchange, 200, channelMap(channel));
@@ -329,6 +364,93 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         {
             nxdn.setRecordUnknownSimplexCalls(request.get("recordUnknownSimplexCalls").getAsBoolean());
         }
+        if(channel.getDecodeConfiguration() instanceof DecodeConfigNBFM nbfm)
+        {
+            applyNbfmSettings(nbfm, request);
+        }
+    }
+
+    static void applyNbfmSettings(DecodeConfigNBFM config, JsonObject request)
+    {
+        if(request.has("nbfmBandwidth"))
+        {
+            DecodeConfigNBFM.Bandwidth bandwidth = DecodeConfigNBFM.Bandwidth.valueOf(
+                request.get("nbfmBandwidth").getAsString());
+            if(!bandwidth.isFM())
+            {
+                throw new IllegalArgumentException("Unsupported NBFM bandwidth: " + bandwidth);
+            }
+            config.setBandwidth(bandwidth);
+        }
+        if(request.has("nbfmTalkgroup"))
+        {
+            config.setTalkgroup(request.get("nbfmTalkgroup").getAsInt());
+        }
+        if(request.has("nbfmAudioFilter"))
+        {
+            config.setAudioFilter(request.get("nbfmAudioFilter").getAsBoolean());
+        }
+        if(request.has("nbfmAudioALC"))
+        {
+            config.setAudioALC(request.get("nbfmAudioALC").getAsBoolean());
+        }
+        if(request.has("nbfmDeemphasis"))
+        {
+            config.setDeemphasis(DeemphasisMode.valueOf(request.get("nbfmDeemphasis").getAsString()));
+        }
+        if(request.has("nbfmSquelchType"))
+        {
+            SquelchDecoderConfig.SquelchType type = SquelchDecoderConfig.SquelchType.valueOf(
+                request.get("nbfmSquelchType").getAsString());
+            List<SquelchDecoderConfig> decoders = new ArrayList<>();
+            if(type != SquelchDecoderConfig.SquelchType.NONE)
+            {
+                String value = request.has("nbfmSquelchValue") ?
+                    request.get("nbfmSquelchValue").getAsString() : "";
+                SquelchDecoderConfig decoder = new SquelchDecoderConfig(type, value);
+                if(!decoder.isValid())
+                {
+                    throw new IllegalArgumentException("Select a valid " + type + " squelch code");
+                }
+                decoders.add(decoder);
+            }
+            config.setSquelchDecoders(decoders);
+        }
+    }
+
+    private void channelOptions(HttpExchange exchange) throws IOException
+    {
+        if(!"GET".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
+        Map<String, Object> result = new LinkedHashMap<>();
+        List<Map<String, String>> bandwidths = new ArrayList<>();
+        for(DecodeConfigNBFM.Bandwidth bandwidth: DecodeConfigNBFM.Bandwidth.FM_BANDWIDTHS)
+        {
+            bandwidths.add(Map.of("value", bandwidth.name(), "label", bandwidth.toString()));
+        }
+        List<Map<String, String>> deemphasis = new ArrayList<>();
+        for(DeemphasisMode mode: DeemphasisMode.values())
+        {
+            deemphasis.add(Map.of("value", mode.name(), "label", mode.toString()));
+        }
+        List<Map<String, String>> ctcss = new ArrayList<>();
+        for(CTCSSCode code: CTCSSCode.STANDARD_CODES)
+        {
+            ctcss.add(Map.of("value", code.name(), "label", code.getDisplayString()));
+        }
+        List<Map<String, String>> dcs = new ArrayList<>();
+        for(DCSCode code: DCSCode.STANDARD_CODES)
+        {
+            dcs.add(Map.of("value", code.name(), "label", code.toString()));
+        }
+        for(DCSCode code: DCSCode.INVERTED_CODES)
+        {
+            dcs.add(Map.of("value", code.name(), "label", code.toString()));
+        }
+        result.put("nbfmBandwidths", bandwidths);
+        result.put("nbfmDeemphasis", deemphasis);
+        result.put("ctcss", ctcss);
+        result.put("dcs", dcs);
+        json(exchange, 200, result);
     }
 
     private DecoderType decoderValue(JsonObject request)
@@ -381,6 +503,7 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
             value.put("host", configuration.getHost());
             value.put("queue", broadcaster != null ? broadcaster.getAudioQueueSize() : 0);
             value.put("sent", broadcaster != null ? broadcaster.getStreamedAudioCount() : 0);
+            value.put("duplicateRejected", broadcaster != null ? broadcaster.getDuplicateRejectedAudioCount() : 0);
             value.put("errors", broadcaster != null ? broadcaster.getAudioErrorCount() : 0);
             value.put("agedOff", broadcaster != null ? broadcaster.getAgedOffAudioCount() : 0);
             result.add(value);
@@ -1245,7 +1368,7 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         <section id="liveTranscriptPanel" class="live-transcript"><div class="transcript-head"><h2>Live Call Transcription</h2><span id="liveTranscriptStatus" class="muted">Whisper status loading…</span></div><div id="liveTranscriptMeta" class="transcript-meta">Waiting for a transcribed call</div><div id="liveTranscriptText" class="transcript-text">Transcribed radio traffic will appear here.</div></section>
         <div class="cards"><div class="card">CPU<div class="value" id="cpu">—</div></div><div class="card">Memory<div class="value" id="memory">—</div></div><div class="card">Tuners<div class="value" id="tunerCount">—</div></div><div class="card">Active channels<div class="value" id="activeCount">—</div></div></div>
         <div class="grid"><section><h2>Tuners</h2><table><thead><tr><th>Name</th><th>Status</th><th>Frequency</th></tr></thead><tbody id="tuners"></tbody></table></section>
-        <section><h2>Streaming destinations</h2><table><thead><tr><th>Name</th><th>Type</th><th>State</th><th>Queue</th></tr></thead><tbody id="streams"></tbody></table></section></div>
+        <section><h2>Streaming destinations</h2><table><thead><tr><th>Name</th><th>Type</th><th>State</th><th>Queue</th><th>Sent</th><th>Duplicate Rejected</th><th>Errors</th></tr></thead><tbody id="streams"></tbody></table></section></div>
         <section><h2>Playlist Channels <button onclick="openChannelEditor()">New Channel</button></h2><table><thead><tr><th>System</th><th>Site</th><th>Name</th><th>Decoder</th><th>Status</th><th>Control</th></tr></thead><tbody id="channels"></tbody></table></section>
         <section><h2>Talkgroups &amp; Aliases <button onclick="openTalkgroupEditor()">Add Talkgroup</button></h2><p class="muted">Add or edit talkgroups imported from RadioReference. Assigning a Remote Call destination controls which calls are sent there.</p><table><thead><tr><th>Alias List</th><th>Talkgroup</th><th>Name</th><th>Group</th><th>Protocol</th><th>Record</th><th>Remote Calls</th><th></th></tr></thead><tbody id="talkgroups"></tbody></table></section>
         <section><h2>Recorded audio</h2><table><thead><tr><th>File</th><th>Date</th><th>Size</th><th></th></tr></thead><tbody id="recordings"></tbody></table></section>
@@ -1254,7 +1377,7 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         <section id="transcriptsSection"><h2>Scanner Transcripts</h2><p class="muted">Completed calls are transcribed in the background. Pin an address or transcript to preview it with OpenStreetMap.</p><table><thead><tr><th>Time</th><th>Talkgroup</th><th>Alias</th><th>Transcript</th><th></th></tr></thead><tbody id="transcripts"></tbody></table><iframe id="mapFrame" title="Transcript location map"></iframe></section>
         <section id="remoteCalls"><h2>Remote Calls <button onclick="openRemoteEditor()">Add Destination</button></h2><p class="muted">Heartbeats verify the receiver is accepting data. Failed or stale connections automatically discard the pooled HTTP connection and retry; queued calls are preserved.</p><table><thead><tr><th>Name</th><th>POST URL</th><th>Connection</th><th>Heartbeat</th><th>Last Call</th><th>Transcription</th><th></th></tr></thead><tbody id="remoteDestinations"></tbody></table></section>
         <section id="whisperSettings"><h2>Whisper Settings</h2><form id="whisperForm"><div class="cards"><label>Whisper executable<br><input name="executable" placeholder="whisper"></label><label>Model<br><input name="model" placeholder="base.en"></label><label>Language<br><input name="language" value="English"></label><label>Task<br><select name="task"><option>transcribe</option><option>translate</option></select></label><label>Timeout seconds<br><input name="timeoutSeconds" type="number" min="10" value="180"></label><label>Map city / region<br><input name="city"></label></div><p><label><input name="enabled" type="checkbox"> Enable background transcription</label> <label><input name="normalize" type="checkbox"> Normalize scanner numbers</label> <label><input name="redact" type="checkbox"> Redact PII</label></p><label>Scanner vocabulary prompt<br><textarea name="prompt" rows="5"></textarea></label><p><button type="submit">Save Whisper Settings</button> <span id="whisperResult" class="muted"></span></p><p class="muted"><a href="https://github.com/robgwi/sdrtrunk/blob/master/WHISPER_SETUP.md" target="_blank">Open the complete Whisper setup guide</a>. Install source: <a href="https://github.com/robgwi/whisper" target="_blank">robgwi/whisper</a>. Python, PyTorch, ffmpeg, the Whisper package, and model weights are installed separately from the Java application.</p></form></section>
-        <dialog id="channelDialog"><form id="channelForm"><input name="id" type="hidden"><h2>Edit Playlist Channel</h2><p><label>Name<br><input name="name" required></label></p><p><label>System<br><input name="system"></label> <label>Site<br><input name="site"></label></p><p><label>Frequency (Hz)<br><input name="frequency" type="number" min="0"></label> <label>Protocol<br><select name="decoder"><option>AM</option><option>DMR</option><option>LTR</option><option>LTR_NET</option><option>MPT1327</option><option>NBFM</option><option>NXDN</option><option>PASSPORT</option><option>P25_PHASE1</option><option>P25_PHASE2</option></select></label></p><p><label>Alias list<br><input name="aliasList"></label> <label><input name="autoStart" type="checkbox"> Auto-start</label></p><p><label id="recordUnknownSimplexCallsLabel"><input name="recordUnknownSimplexCalls" type="checkbox"> Record unknown NXDN simplex radio IDs</label></p><button type="submit">Save</button> <button type="button" onclick="channelDialog.close()">Cancel</button> <button id="deleteChannel" type="button">Delete</button><span id="channelResult" class="muted"></span></form></dialog>
+        <dialog id="channelDialog"><form id="channelForm"><input name="id" type="hidden"><h2>Edit Playlist Channel</h2><p><label>Name<br><input name="name" required></label></p><p><label>System<br><input name="system"></label> <label>Site<br><input name="site"></label></p><p><label>Frequency (Hz)<br><input name="frequency" type="number" min="0"></label> <label>Protocol<br><select name="decoder"><option>AM</option><option>DMR</option><option>LTR</option><option>LTR_NET</option><option>MPT1327</option><option>NBFM</option><option>NXDN</option><option>PASSPORT</option><option>P25_PHASE1</option><option>P25_PHASE2</option></select></label></p><p><label>Alias list<br><input name="aliasList"></label> <label><input name="autoStart" type="checkbox"> Auto-start</label></p><p><label id="recordUnknownSimplexCallsLabel"><input name="recordUnknownSimplexCalls" type="checkbox"> Record unknown NXDN simplex radio IDs</label></p><fieldset id="nbfmOptions" hidden><legend>NBFM Decoder</legend><div class="cards"><label>Channel bandwidth<br><select name="nbfmBandwidth"></select></label><label>Talkgroup to assign<br><input name="nbfmTalkgroup" type="number" min="1" max="65535" value="1"></label><label>De-emphasis<br><select name="nbfmDeemphasis"></select></label><label>Squelch decoder<br><select name="nbfmSquelchType"><option value="NONE">None</option><option value="CTCSS">CTCSS</option><option value="DCS">DCS</option></select></label><label id="nbfmSquelchValueLabel">Squelch code<br><select name="nbfmSquelchValue"></select></label></div><p><label><input name="nbfmAudioFilter" type="checkbox" checked> High-pass audio filter (300 Hz)</label> <label><input name="nbfmAudioALC" type="checkbox"> Automatic level control</label></p></fieldset><button type="submit">Save</button> <button type="button" onclick="channelDialog.close()">Cancel</button> <button id="deleteChannel" type="button">Delete</button><span id="channelResult" class="muted"></span></form></dialog>
         <dialog id="talkgroupDialog"><form id="talkgroupForm"><input name="id" type="hidden"><h2>Talkgroup / Alias</h2><div class="cards"><label>Alias list<br><input name="aliasList" required></label><label>Talkgroup ID<br><input name="talkgroup" type="number" min="0" required></label><label>Talkgroup name / alias<br><input name="name" required></label><label>Category / group<br><input name="group"></label><label>Protocol<br><select name="protocol"><option value="APCO25">P25</option><option>DMR</option><option>NXDN</option><option>LTR</option><option>LTR_NET</option><option>MPT1327</option><option>PASSPORT</option><option>NBFM</option><option>AM</option></select></label><label>Playback priority<br><input name="priority" type="number" min="1" max="100" value="100"></label></div><p><label><input name="record" type="checkbox"> Record calls</label></p><fieldset><legend>Send calls to Remote Calls destinations</legend><div id="talkgroupRemoteCalls" class="cards"></div></fieldset><p><button type="submit">Save</button> <button type="button" onclick="talkgroupDialog.close()">Cancel</button> <button id="deleteTalkgroup" type="button">Delete</button> <span id="talkgroupResult" class="muted"></span></p></form></dialog>
         <dialog id="remoteDialog"><form id="remoteForm"><input name="originalName" type="hidden"><h2>Remote Call API Destination</h2><div class="cards"><label>Name<br><input name="name" required></label><label>POST URL<br><input name="url" type="url" required></label><label>API key<br><input name="apiKey" type="password" autocomplete="new-password" placeholder="Leave blank to keep current key"></label><label>API key environment variable<br><input name="apiKeyEnvironmentVariable" value="SDRTRUNK_REMOTE_API_KEY"></label><label>Authentication header<br><input name="authenticationHeader" value="Authorization"></label><label>Authentication prefix<br><input name="authenticationPrefix" value="Bearer "></label><label>Fast retries before 5-minute backoff<br><input name="maximumRetries" type="number" min="0" value="5"></label><label>Concurrent uploads<br><input name="maximumConcurrentUploads" type="number" min="1" value="2"></label><label>Timeout seconds<br><input name="requestTimeoutSeconds" type="number" min="1" value="60"></label><label>Maximum call age seconds (used when continuous retry is off)<br><input name="maximumRecordingAgeSeconds" type="number" min="1" value="600"></label><label>Heartbeat interval seconds<br><input name="heartbeatIntervalSeconds" type="number" min="5" value="60"></label><label>OpenAI key environment variable<br><input name="openAiKeyEnvironmentVariable" value="OPENAI_API_KEY"></label><label>Local Whisper executable<br><input name="localWhisperExecutable"></label><label>Local Whisper model<br><input name="localWhisperModel"></label></div><p><label><input name="enabled" type="checkbox" checked> Enabled</label> <label><input name="heartbeatEnabled" type="checkbox"> Send heartbeat</label> <label><input name="retryIndefinitely" type="checkbox" checked> Keep retrying queued calls</label> <label><input name="openAiEnabled" type="checkbox"> OpenAI Whisper</label> <label><input name="translateToEnglish" type="checkbox"> Translate to English</label></p><p class="muted">Heartbeat uses an authenticated JSON POST to this destination's POST URL. The receiver must return HTTP 2xx. Queued calls are retained during reconnect, destination edits, and disable/enable cycles when continuous retry is enabled. A key entered here is saved in the playlist; the environment variable is safer and takes priority.</p><button type="submit">Save</button> <button type="button" onclick="remoteDialog.close()">Cancel</button> <button id="deleteRemote" type="button">Delete</button> <span id="remoteResult" class="muted"></span></form></dialog>
         </main><script>
@@ -1277,11 +1400,14 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         async function pollLive(){if(!liveOn)return;try{const r=await fetch('/api/v1/live-audio?after='+liveSequence,{headers:apiHeaders(false)});if(r.status===200){liveSequence=Number(r.headers.get('X-Audio-Sequence'));liveQueue.textContent=(r.headers.get('X-Audio-Queued')||'0')+' queued';const status=await fetch('/api/v1/live-status?sequence='+liveSequence,{headers:apiHeaders(false)}).then(x=>x.json());await playLive(r,status)}}catch(e){liveStatus.textContent=e.message}finally{if(liveOn)setTimeout(pollLive,250)}}
         async function playRecording(name){if(liveOn){liveOn=false;liveToggle.textContent='Start Live Listening';audioPlayer.pause();if(liveFinish)liveFinish()}const r=await fetch('/api/v1/recording-audio?name='+encodeURIComponent(name),{headers:apiHeaders(false)});await useAudio(r,'Playing '+name)}
         async function control(name,action){await fetch('/api/v1/channel-control',{method:'POST',headers:apiHeaders(true),body:JSON.stringify({name,action})});refresh()}
-        let channelCache=[];
-        function updateNxdnChannelOptions(){recordUnknownSimplexCallsLabel.style.display=channelForm.elements.decoder.value==='NXDN'?'inline':'none'}
-        function openChannelEditor(id){const x=channelCache.find(c=>c.id===id)||{};channelForm.reset();for(const k of ['id','name','system','site','frequency','decoder','aliasList'])if(x[k]!=null)channelForm.elements[k].value=x[k];channelForm.elements.autoStart.checked=!!x.autoStart;channelForm.elements.recordUnknownSimplexCalls.checked=!!x.recordUnknownSimplexCalls;updateNxdnChannelOptions();deleteChannel.style.display=id==null?'none':'inline-block';channelResult.textContent='';channelDialog.showModal()}
-        channelForm.elements.decoder.addEventListener('change',updateNxdnChannelOptions);
-        channelForm.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(channelForm),body=Object.fromEntries(f);body.action=body.id?'update':'create';if(body.id)body.id=Number(body.id);body.frequency=Number(body.frequency||0);body.autoStart=f.has('autoStart');body.recordUnknownSimplexCalls=f.has('recordUnknownSimplexCalls');const r=await fetch('/api/v1/channels',{method:'POST',headers:apiHeaders(true),body:JSON.stringify(body)});channelResult.textContent=r.ok?'Saved':(await r.json()).error;if(r.ok){channelDialog.close();refresh()}});
+        let channelCache=[],channelOptionCache={nbfmBandwidths:[],nbfmDeemphasis:[],ctcss:[],dcs:[]},channelOptionsLoaded=false;
+        function setChannelSelect(control,items,selected){control.innerHTML=(items||[]).map(x=>`<option value="${esc(x.value)}" ${x.value===selected?'selected':''}>${esc(x.label)}</option>`).join('')}
+        async function loadChannelOptions(){if(channelOptionsLoaded)return;try{const r=await fetch('/api/v1/channel-options',{headers:apiHeaders(false)});if(!r.ok)return;channelOptionCache=await r.json();channelOptionsLoaded=true;setChannelSelect(channelForm.elements.nbfmBandwidth,channelOptionCache.nbfmBandwidths,channelForm.elements.nbfmBandwidth.value||'BW_12_5');setChannelSelect(channelForm.elements.nbfmDeemphasis,channelOptionCache.nbfmDeemphasis,channelForm.elements.nbfmDeemphasis.value||'NONE')}catch(e){}}
+        function updateNbfmSquelchValues(selected){const type=channelForm.elements.nbfmSquelchType.value,items=type==='CTCSS'?channelOptionCache.ctcss:(type==='DCS'?channelOptionCache.dcs:[]);setChannelSelect(channelForm.elements.nbfmSquelchValue,items,selected||'');nbfmSquelchValueLabel.style.display=type==='NONE'?'none':'block'}
+        function updateChannelOptions(){const decoder=channelForm.elements.decoder.value;recordUnknownSimplexCallsLabel.style.display=decoder==='NXDN'?'inline':'none';nbfmOptions.hidden=decoder!=='NBFM';if(decoder==='NBFM')updateNbfmSquelchValues(channelForm.elements.nbfmSquelchValue.value)}
+        async function openChannelEditor(id){await loadChannelOptions();const x=channelCache.find(c=>c.id===id)||{nbfmBandwidth:'BW_12_5',nbfmTalkgroup:1,nbfmAudioFilter:true,nbfmAudioALC:false,nbfmDeemphasis:'NONE',nbfmSquelchType:'NONE',nbfmSquelchValue:''};channelForm.reset();for(const k of ['id','name','system','site','frequency','decoder','aliasList','nbfmBandwidth','nbfmTalkgroup','nbfmDeemphasis'])if(x[k]!=null)channelForm.elements[k].value=x[k];channelForm.elements.autoStart.checked=!!x.autoStart;channelForm.elements.recordUnknownSimplexCalls.checked=!!x.recordUnknownSimplexCalls;channelForm.elements.nbfmAudioFilter.checked=x.nbfmAudioFilter!==false;channelForm.elements.nbfmAudioALC.checked=!!x.nbfmAudioALC;channelForm.elements.nbfmSquelchType.value=x.nbfmSquelchType||'NONE';updateChannelOptions();updateNbfmSquelchValues(x.nbfmSquelchValue||'');deleteChannel.style.display=id==null?'none':'inline-block';channelResult.textContent='';channelDialog.showModal()}
+        channelForm.elements.decoder.addEventListener('change',updateChannelOptions);channelForm.elements.nbfmSquelchType.addEventListener('change',()=>updateNbfmSquelchValues(''));
+        channelForm.addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(channelForm),body=Object.fromEntries(f);body.action=body.id?'update':'create';if(body.id)body.id=Number(body.id);body.frequency=Number(body.frequency||0);body.autoStart=f.has('autoStart');body.recordUnknownSimplexCalls=f.has('recordUnknownSimplexCalls');body.nbfmTalkgroup=Number(body.nbfmTalkgroup||1);body.nbfmAudioFilter=f.has('nbfmAudioFilter');body.nbfmAudioALC=f.has('nbfmAudioALC');const r=await fetch('/api/v1/channels',{method:'POST',headers:apiHeaders(true),body:JSON.stringify(body)});const j=await r.json();channelResult.textContent=r.ok?'Saved':j.error;if(r.ok){channelDialog.close();refresh()}});
         deleteChannel.addEventListener('click',async()=>{if(!confirm('Delete this channel?'))return;const r=await fetch('/api/v1/channels',{method:'POST',headers:apiHeaders(true),body:JSON.stringify({action:'delete',id:Number(channelForm.elements.id.value)})});if(r.ok){channelDialog.close();refresh()}else channelResult.textContent=(await r.json()).error});
         let talkgroupCache=[],remoteCache=[];
         function openTalkgroupEditor(id,aliasList){const x=talkgroupCache.find(t=>t.id===id)||{aliasList:aliasList||'',priority:100,protocol:'APCO25',remoteCalls:[]};talkgroupForm.reset();for(const k of ['id','aliasList','talkgroup','name','group','protocol','priority'])if(x[k]!=null)talkgroupForm.elements[k].value=x[k];talkgroupForm.elements.record.checked=!!x.record;talkgroupRemoteCalls.innerHTML=remoteCache.map(d=>`<label><input type="checkbox" name="remoteCalls" value="${esc(d.name)}" ${(x.remoteCalls||[]).includes(d.name)?'checked':''}> ${esc(d.name)}</label>`).join('')||'<span class="muted">Add a Remote Calls destination below first.</span>';deleteTalkgroup.style.display=id==null?'none':'inline-block';talkgroupResult.textContent='';talkgroupDialog.showModal()}
@@ -1323,7 +1449,7 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         async function reconnectRemote(name){const r=await fetch('/api/v1/remote-destinations',{method:'POST',headers:apiHeaders(true),body:JSON.stringify({action:'reconnect',originalName:name})}),j=await r.json();if(!r.ok)alert(j.error||'Reconnect failed');refresh()}
         async function refresh(){const errors=[];const get=async(name,fallback)=>{try{const response=await fetch('/api/v1/'+name,{headers:apiHeaders(false)});const body=await response.json();if(!response.ok)throw Error(response.status===401?'Access token required':(body.error||'HTTP '+response.status));return body}catch(e){errors.push(name+': '+e.message);return fallback}};try{const [s,t,c,b,r,a,tg,rd]=await Promise.all([get('status',{}),get('tuners',[]),get('channels',[]),get('broadcasters',[]),get('recordings',[]),get('activity',[]),get('talkgroups',[]),get('remote-destinations',[])]);cpu.textContent=s.cpuAvailable?(s.cpu<.005?'<1%':(s.cpu*100).toFixed(1)+'%'):'Unavailable';memory.textContent=s.memoryUsed!=null?mb(s.memoryUsed)+' / '+mb(s.memoryMaximum):'Unavailable';tunerCount.textContent=t.length;activeCount.textContent=c.filter(x=>x.processing).length;
         const current=a.length&&Date.now()-Math.max(Number(a[0].time)||0,Number(a[0].end)||0)<5000?a[0]:null;scanState.textContent=current?'RECEIVING':'SCANNING';scanState.className='scan-state'+(current?' receiving':'');if(current){activeTalkgroup.textContent=current.talkgroup||'';activeAlias.textContent=current.alias&&current.alias!=='Unidentified'?current.alias:'';activeFrequency.textContent=current.frequency?mhz(current.frequency):'';activeSource.textContent=current.source||'';signalText.textContent=current.signalAvailable&&current.signalDbm!=null?current.signalDbm+' dBm':'';audioLevelText.textContent='';signalMeter.style.width='0'}else clearScanner()
-        channelCache=c.filter(x=>x.type==='STANDARD');talkgroupCache=tg;remoteCache=rd;tuners.innerHTML=t.map(x=>`<tr><td>${esc(x.name||x.id)}</td><td>${esc(x.status)}</td><td>${mhz(x.frequency)}</td></tr>`).join('');streams.innerHTML=b.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.type)}</td><td>${esc(x.state)}</td><td>${x.queue}</td></tr>`).join('');channels.innerHTML=c.map(x=>`<tr><td>${esc(x.system)}</td><td>${esc(x.site)}</td><td>${esc(x.name)}</td><td>${esc(x.decoder)}</td><td>${x.processing?'Active':'Stopped'}</td><td><button onclick="control(decodeURIComponent('${encodeURIComponent(x.name)}'),'${x.processing?'stop':'start'}')">${x.processing?'Stop':'Start'}</button> ${x.type==='STANDARD'?`<button onclick="openChannelEditor(${x.id})">Edit</button> <button onclick="openTalkgroupEditor(null,decodeURIComponent('${encodeURIComponent(x.aliasList||'')}'))">Add TG</button>`:''}</td></tr>`).join('');talkgroups.innerHTML=tg.map(x=>`<tr><td>${esc(x.aliasList)}</td><td>${x.talkgroup}</td><td>${esc(x.name)}</td><td>${esc(x.group)}</td><td>${esc(x.protocol)}</td><td>${x.record?'Yes':'No'}</td><td>${esc((x.remoteCalls||[]).join(', '))}</td><td><button onclick="openTalkgroupEditor(${x.id})">Edit</button></td></tr>`).join('');remoteDestinations.innerHTML=rd.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.url)}</td><td>${connectionStatus(x)}</td><td>${esc(heartbeatStatus(x))}</td><td>${esc(callStatus(x))}</td><td>${x.openAiEnabled?(x.translateToEnglish?'Translate':'Transcribe'):(x.localWhisperExecutable?'Local Whisper':'Off')}</td><td><button onclick="reconnectRemote(decodeURIComponent('${encodeURIComponent(x.name)}'))">Reconnect</button> <button onclick="openRemoteEditor(decodeURIComponent('${encodeURIComponent(x.name)}'))">Edit</button></td></tr>`).join('');recordings.innerHTML=r.map(x=>`<tr><td>${esc(x.name)}</td><td>${new Date(x.modified).toLocaleString()}</td><td>${mb(x.size)}</td><td><button onclick="playRecording(decodeURIComponent('${encodeURIComponent(x.name)}'))">Play</button></td></tr>`).join('');activity.innerHTML=a.slice(0,30).map(x=>`<tr><td>${new Date(x.time).toLocaleTimeString()}</td><td>${esc(x.talkgroup)}</td><td>${esc(x.alias||'Unidentified')}</td><td>${esc(x.source)}</td><td>${esc(x.protocol)}</td><td>${mhz(x.frequency)}</td><td>${esc(x.type)}</td></tr>`).join('');updated.textContent=errors.length?errors.join(' | '):'Updated '+new Date().toLocaleTimeString()}catch(e){updated.textContent=e.message}}refresh();setInterval(refresh,2000);
+        channelCache=c.filter(x=>x.type==='STANDARD');talkgroupCache=tg;remoteCache=rd;tuners.innerHTML=t.map(x=>`<tr><td>${esc(x.name||x.id)}</td><td>${esc(x.status)}</td><td>${mhz(x.frequency)}</td></tr>`).join('');streams.innerHTML=b.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.type)}</td><td>${esc(x.state)}</td><td>${x.queue}</td><td>${x.sent}</td><td>${x.duplicateRejected}</td><td>${x.errors}</td></tr>`).join('');channels.innerHTML=c.map(x=>`<tr><td>${esc(x.system)}</td><td>${esc(x.site)}</td><td>${esc(x.name)}</td><td>${esc(x.decoder)}</td><td>${x.processing?'Active':'Stopped'}</td><td><button onclick="control(decodeURIComponent('${encodeURIComponent(x.name)}'),'${x.processing?'stop':'start'}')">${x.processing?'Stop':'Start'}</button> ${x.type==='STANDARD'?`<button onclick="openChannelEditor(${x.id})">Edit</button> <button onclick="openTalkgroupEditor(null,decodeURIComponent('${encodeURIComponent(x.aliasList||'')}'))">Add TG</button>`:''}</td></tr>`).join('');talkgroups.innerHTML=tg.map(x=>`<tr><td>${esc(x.aliasList)}</td><td>${x.talkgroup}</td><td>${esc(x.name)}</td><td>${esc(x.group)}</td><td>${esc(x.protocol)}</td><td>${x.record?'Yes':'No'}</td><td>${esc((x.remoteCalls||[]).join(', '))}</td><td><button onclick="openTalkgroupEditor(${x.id})">Edit</button></td></tr>`).join('');remoteDestinations.innerHTML=rd.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.url)}</td><td>${connectionStatus(x)}</td><td>${esc(heartbeatStatus(x))}</td><td>${esc(callStatus(x))}</td><td>${x.openAiEnabled?(x.translateToEnglish?'Translate':'Transcribe'):(x.localWhisperExecutable?'Local Whisper':'Off')}</td><td><button onclick="reconnectRemote(decodeURIComponent('${encodeURIComponent(x.name)}'))">Reconnect</button> <button onclick="openRemoteEditor(decodeURIComponent('${encodeURIComponent(x.name)}'))">Edit</button></td></tr>`).join('');recordings.innerHTML=r.map(x=>`<tr><td>${esc(x.name)}</td><td>${new Date(x.modified).toLocaleString()}</td><td>${mb(x.size)}</td><td><button onclick="playRecording(decodeURIComponent('${encodeURIComponent(x.name)}'))">Play</button></td></tr>`).join('');activity.innerHTML=a.slice(0,30).map(x=>`<tr><td>${new Date(x.time).toLocaleTimeString()}</td><td>${esc(x.talkgroup)}</td><td>${esc(x.alias||'Unidentified')}</td><td>${esc(x.source)}</td><td>${esc(x.protocol)}</td><td>${mhz(x.frequency)}</td><td>${esc(x.type)}</td></tr>`).join('');updated.textContent=errors.length?errors.join(' | '):'Updated '+new Date().toLocaleTimeString()}catch(e){updated.textContent=e.message}}refresh();setInterval(refresh,2000);
         refreshTranscripts();setInterval(refreshTranscripts,3000);
         </script></body></html>""";
 }
