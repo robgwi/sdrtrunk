@@ -49,6 +49,7 @@ public class NBFMDecoderState extends AnalogDecoderState
 
     // Tone filter configuration (from DecodeConfigNBFM)
     private boolean mSquelchDecoderEnabled = false;
+    private boolean mCTCSSSearchEnabled = false;
     private List<SquelchDecoderConfig> mConfiguredSquelchDecoders = new ArrayList<>();
 
     // Current status
@@ -69,7 +70,8 @@ public class NBFMDecoderState extends AnalogDecoderState
         mTalkgroupIdentifier = new NBFMTalkgroup(decodeConfig.getTalkgroup());
 
         mSquelchDecoderEnabled = decodeConfig.isSquelchDecoderEnabled();
-        if(mSquelchDecoderEnabled && decodeConfig.getSquelchDecoders() != null)
+        mCTCSSSearchEnabled = decodeConfig.isCTCSSSearchEnabled();
+        if((mSquelchDecoderEnabled || mCTCSSSearchEnabled) && decodeConfig.getSquelchDecoders() != null)
         {
             mConfiguredSquelchDecoders.addAll(decodeConfig.getSquelchDecoders());
         }
@@ -100,7 +102,8 @@ public class NBFMDecoderState extends AnalogDecoderState
     {
         if(code != null)
         {
-            mToneStatus = "CTCSS: " + code.getDisplayString() + " [ALLOWED]";
+            mToneStatus = "CTCSS: " + code.getDisplayString() +
+                (mCTCSSSearchEnabled ? " [DETECTED]" : " [ALLOWED]");
             incrementCount(code.getDisplayString(), true);
         }
     }
@@ -182,7 +185,12 @@ public class NBFMDecoderState extends AnalogDecoderState
         sb.append("Activity Summary - Decoder:NBFM\n");
 
         sb.append("\n\nSquelch Decoder: ");
-        if(mSquelchDecoderEnabled)
+        if(mCTCSSSearchEnabled)
+        {
+            sb.append("CTCSS TONE SEARCH\n");
+            sb.append("Carrier squelch audio remains enabled while standard tones are identified.\n");
+        }
+        else if(mSquelchDecoderEnabled)
         {
             sb.append("ENABLED\n");
             sb.append("Configured decoder: ");

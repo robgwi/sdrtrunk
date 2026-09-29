@@ -66,4 +66,20 @@ class SdrTrunkWebServerTest
         assertThrows(IllegalArgumentException.class,
             () -> SdrTrunkWebServer.applyNbfmSettings(config, request));
     }
+
+    @Test
+    void appliesCtcssToneSearchWithoutMutingCarrierAudio()
+    {
+        DecodeConfigNBFM config = new DecodeConfigNBFM();
+        JsonObject request = new JsonObject();
+        request.addProperty("nbfmSquelchType", SquelchDecoderConfig.SquelchType.CTCSS_SEARCH.name());
+
+        SdrTrunkWebServer.applyNbfmSettings(config, request);
+
+        assertTrue(config.isCTCSSSearchEnabled());
+        assertFalse(config.isSquelchDecoderEnabled());
+        assertEquals(SquelchDecoderConfig.SquelchType.CTCSS_SEARCH,
+            config.getSquelchDecoders().getFirst().getSquelchType());
+        assertTrue(config.getSquelchDecoders().getFirst().isValid());
+    }
 }

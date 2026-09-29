@@ -4,9 +4,9 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.7.0-beta-16
+## Current release: 0.7.0-beta-17
 
-- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 16](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-16)
+- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 17](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-17)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Linux x86_64 installation guide](LINUX_X86_64.md)
 - [Local Whisper setup guide](WHISPER_SETUP.md)
@@ -45,13 +45,13 @@ The web channel and talkgroup editor can:
 - Configure and test a RadioReference Premium account using the same shared service as the desktop editor.
 - Browse country, state, county, statewide systems, and county systems; then preview and selectively import trunked-system talkgroups without duplicates.
 - Filter RadioReference talkgroups by category or search text, create an alias list, identify previously imported entries, and optionally mark fully encrypted imports as Do Not Monitor.
-- Edit talkgroup name, category, protocol, numeric ID, recording flag, and playback priority.
+- Edit talkgroup name, category, protocol, numeric ID, recording flag, playback priority, and CTCSS alias identifier.
 - Select the Remote Calls destinations that receive each talkgroup, using the same alias routing model as the desktop app.
 - Add, edit, enable, disable, and delete Remote Call API destinations, including authentication, heartbeat, retry, timeout, hosted Whisper, local Whisper, and translation settings.
-- Configure NBFM bandwidth, assigned talkgroup, CTCSS/DCS squelch code, de-emphasis, high-pass filtering, and automatic level control.
+- Configure NBFM bandwidth, assigned talkgroup, carrier/CTCSS/DCS squelch, CTCSS tone search, de-emphasis, high-pass filtering, and automatic level control.
 - Include the configured talkgroup alias in saved audio filenames for easier browsing and identification.
 
-Other advanced protocol-specific decoder fields, site/channel creation, conventional agency-frequency imports, and non-talkgroup alias identifier types still use the Java desktop Playlist Editor. The web RadioReference workflow now mirrors the desktop trunked-talkgroup import path.
+Other advanced protocol-specific decoder fields, site/channel creation, conventional agency-frequency imports, and alias identifier types other than the web editor's talkgroup and CTCSS fields still use the Java desktop Playlist Editor. The web RadioReference workflow now mirrors the desktop trunked-talkgroup import path.
 
 ### Desktop Playlist Editor improvements
 
@@ -59,6 +59,9 @@ Other advanced protocol-specific decoder fields, site/channel creation, conventi
 - Choose a protocol while cloning a channel.
 - Preserve general channel settings while resetting incompatible protocol-specific decoder options.
 - Enable **Record Unknown Simplex Radio IDs** on an NXDN channel to record inbound direct calls when either radio ID has no alias.
+- Use **NBFM Squelch: Carrier / CTCSS / DCS** to select carrier squelch, a fixed CTCSS tone, a fixed DCS code, or CTCSS tone search.
+- Add CTCSS tones as first-class alias identifiers from the NBFM alias menu; tones survive playlist saves and alias cloning and resolve against decoded CTCSS identifiers.
+- Use **DCS Monitor / Code Search** from Additional Decoders when searching for an unknown DCS code.
 - Manage the web access token and restart the embedded web server from **Playlist Editor > Web Interface**.
 
 ### Remote call API and transcription
@@ -90,8 +93,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-16.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-16
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-17.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-17
 bin/sdr-trunk
 ```
 
@@ -109,6 +112,16 @@ bin/sdr-trunk
 Environment variables override saved GUI token settings. Do not commit real keys or tokens to this repository.
 
 ## Release history
+
+### 0.7.0-beta-17
+
+- Renamed the NBFM `None` squelch choice to **Carrier Squelch** and the desktop/web selector to **NBFM Squelch: Carrier / CTCSS / DCS**.
+- Added CTCSS as a first-class alias identifier with playlist XML persistence, decoded-tone alias lookup, independent clone/copy support, desktop editing, and web-console editing.
+- Added **CTCSS Tone Search**, which identifies an unknown standard CTCSS tone while carrier/noise squelch continues to control the audio.
+- Renamed the auxiliary DCS decoder to **DCS Monitor / Code Search** so its search purpose is clear.
+- Added matching carrier, fixed CTCSS, CTCSS search, fixed DCS, and CTCSS alias controls to the web Playlist windows.
+- Fixed CTCSS and DCS alias-map cleanup when an alias is removed or edited, preventing stale tone matches.
+- Added regression coverage for CTCSS lookup/removal, alias cloning, playlist persistence, tone search, and web configuration.
 
 ### 0.7.0-beta-16
 
