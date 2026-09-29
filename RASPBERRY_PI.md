@@ -12,25 +12,25 @@ sudo apt install libusb-1.0-0
 
 ## Install and run
 
-Copy `sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-17.zip` to the Pi, then run:
+Copy `sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-18.zip` to the Pi, then run:
 
 ```bash
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-17.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-17
-export SDRTRUNK_WEB_TOKEN='replace-with-a-long-random-token'
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-18.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-18
+export SDRTRUNK_WEB_PASSWORD='replace-with-a-long-random-password'
 bin/sdr-trunk
 ```
 
-`SDRTRUNK_WEB_TOKEN` is optional.  On the first desktop/VNC launch, sdrtrunk prompts you to create a token and saves
-it.  On the first headless launch, it creates and saves a random token and prints that token once in the startup log.
-The saved token can be replaced while the desktop application is running from **View > Web Access Token**.  An
-`SDRTRUNK_WEB_TOKEN` environment variable overrides the saved GUI setting.
+`SDRTRUNK_WEB_PASSWORD` is optional. On the first desktop/VNC launch, sdrtrunk prompts you to create a password and saves
+it. On the first headless launch, it creates and saves a random password and prints that password once in the startup log.
+The saved password can be replaced while the desktop application is running from **View > Web Console Password**. An
+`SDRTRUNK_WEB_PASSWORD` environment variable overrides the saved GUI setting; `SDRTRUNK_WEB_TOKEN` remains a legacy fallback.
 
-The Playlist Editor also contains a **Web Interface** tab where you can save a replacement token and restart the web
+The Playlist Editor also contains a **Web Interface** tab where you can save a replacement password and restart the web
 server without restarting sdrtrunk. The web dashboard queues completed live radio calls, plays each one fully in
 order, and applies the selected hold time before the next call. It also lists
 the MP3/WAV files in the configured Audio Recordings directory for browser playback.  These audio endpoints require
-the same web access token as the rest of the remote API.
+the same web console password as the rest of the remote API.
 
 The main page is a dedicated scanner-style display. When no call is active, its previous talkgroup, alias, frequency,
 source, signal, and level are cleared. System status, Playlist, RadioReference, Recordings, Transcripts, Remote Calls,

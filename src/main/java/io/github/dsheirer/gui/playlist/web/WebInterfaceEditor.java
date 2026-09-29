@@ -11,7 +11,7 @@ import javafx.scene.layout.VBox;
 /** Playlist editor controls for the embedded web interface. */
 public class WebInterfaceEditor extends VBox
 {
-    private final PasswordField mToken = new PasswordField();
+    private final PasswordField mPassword = new PasswordField();
     private final Label mStatus = new Label();
 
     public WebInterfaceEditor()
@@ -21,23 +21,23 @@ public class WebInterfaceEditor extends VBox
         Label title = new Label("Web Interface");
         title.setStyle("-fx-font-size: 18px; -fx-font-weight: bold;");
         Label help = new Label("Manage browser access and restart the embedded web server. " +
-            "The SDRTRUNK_WEB_TOKEN environment variable overrides this saved token.");
+            "The SDRTRUNK_WEB_PASSWORD environment variable overrides this saved password.");
         help.setWrapText(true);
 
-        mToken.setText(SdrTrunkWebServer.getSavedToken());
-        mToken.setPromptText("Web access token");
-        mToken.setPrefColumnCount(40);
+        mPassword.setText(SdrTrunkWebServer.getSavedPassword());
+        mPassword.setPromptText("Web console password");
+        mPassword.setPrefColumnCount(40);
 
-        Button save = new Button("Save Token");
-        save.setOnAction(event -> saveToken());
+        Button save = new Button("Save Password");
+        save.setOnAction(event -> savePassword());
         Button restart = new Button("Restart Web Interface");
         restart.setOnAction(event -> restart());
 
         GridPane controls = new GridPane();
         controls.setHgap(10);
         controls.setVgap(10);
-        controls.add(new Label("Access token:"), 0, 0);
-        controls.add(mToken, 1, 0);
+        controls.add(new Label("Password:"), 0, 0);
+        controls.add(mPassword, 1, 0);
         controls.add(save, 0, 1);
         controls.add(restart, 1, 1);
 
@@ -46,16 +46,16 @@ public class WebInterfaceEditor extends VBox
             new Label("Web address: http://<this-computer-address>:" + SdrTrunkWebServer.DEFAULT_PORT + "/"));
     }
 
-    private void saveToken()
+    private void savePassword()
     {
-        String token = mToken.getText() == null ? "" : mToken.getText().trim();
-        if(token.isBlank())
+        String password = mPassword.getText() == null ? "" : mPassword.getText().trim();
+        if(password.isBlank())
         {
-            mStatus.setText("Token cannot be empty.");
+            mStatus.setText("Password cannot be empty.");
             return;
         }
-        SdrTrunkWebServer.saveToken(token);
-        mStatus.setText("Token saved and applied. Browsers must reconnect using the new token.");
+        SdrTrunkWebServer.savePassword(password);
+        mStatus.setText("Password saved and applied. Existing browser sessions were signed out.");
     }
 
     private void restart()

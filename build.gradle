@@ -398,8 +398,8 @@ tasks.register('runtimeZipOthers', RuntimeZipTask) {rt ->
 /**
  * Creates a self-contained Linux aarch64 distribution for 64-bit Raspberry Pi OS.
  * The bundled runtime includes JavaFX because parts of the existing application model still depend on JavaFX types,
- * even when no desktop is present.  The web server listens on all interfaces and rejects non-loopback API requests
- * unless SDRTRUNK_WEB_TOKEN is set in the launch environment.
+ * even when no desktop is present. The web server listens on all interfaces and requires the saved web-console
+ * password or SDRTRUNK_WEB_PASSWORD from the launch environment.
  *
  * Usage: ./gradlew runtimeZipRaspberryPi
  * Output: build/image/sdr-trunk-raspberry-pi-aarch64.zip

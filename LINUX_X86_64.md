@@ -14,8 +14,8 @@ Java 26 and JavaFX runtime, so a separate Java installation is not required.
 ```bash
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
-unzip sdr-trunk-linux-x86_64-v0.7.0-beta-17.zip
-cd sdr-trunk-linux-x86_64-v0.7.0-beta-17
+unzip sdr-trunk-linux-x86_64-v0.7.0-beta-18.zip
+cd sdr-trunk-linux-x86_64-v0.7.0-beta-18
 bin/sdr-trunk
 ```
 
@@ -29,18 +29,18 @@ JAVA_OPTS='-Djava.awt.headless=true' bin/sdr-trunk
 
 The web console listens on port 10000. Open `http://<linux-computer-address>:10000/` from another computer.
 
-On the first headless launch, sdrtrunk creates a random web access token, saves it, and writes it once to the startup
+On the first headless launch, sdrtrunk creates a random web console password, saves it, and writes it once to the startup
 log. You can also provide one explicitly:
 
 ```bash
-export SDRTRUNK_WEB_TOKEN='replace-with-a-long-random-token'
+export SDRTRUNK_WEB_PASSWORD='replace-with-a-long-random-password'
 JAVA_OPTS='-Djava.awt.headless=true' bin/sdr-trunk
 ```
 
 API requests from another computer must include:
 
 ```text
-Authorization: Bearer replace-with-a-long-random-token
+Authorization: Bearer replace-with-a-long-random-password
 ```
 
 ## Local Whisper

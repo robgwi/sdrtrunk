@@ -114,6 +114,7 @@ public class SDRTrunk implements Listener<TunerEvent>
     private static final String PREFERENCE_BROADCAST_STATUS_VISIBLE = "sdrtrunk.broadcast.status.visible";
     private static final String PREFERENCE_NOW_PLAYING_DETAILS_VISIBLE = "sdrtrunk.now.playing.details.visible";
     private static final String PREFERENCE_RESOURCE_STATUS_VISIBLE = "sdrtrunk.resource.status.visible";
+    private static final String PREFERENCE_WEB_PASSWORD = "sdrtrunk.web.password";
     private static final String PREFERENCE_WEB_ACCESS_TOKEN = "sdrtrunk.web.access.token";
     private static final String BASE_WINDOW_NAME = "sdrtrunk.main.window";
     private static final String CONTROLLER_PANEL_IDENTIFIER = BASE_WINDOW_NAME + ".control.panel";
@@ -190,7 +191,7 @@ public class SDRTrunk implements Listener<TunerEvent>
         mPlaylistManager = new PlaylistManager(mUserPreferences, mTunerManager, aliasModel, eventLogManager, mIconModel);
 
         boolean headless = GraphicsEnvironment.isHeadless();
-        String webAccessToken = getOrCreateWebAccessToken(headless);
+        String webPassword = getOrCreateWebPassword(headless);
 
         mDiagnosticMonitor = new DiagnosticMonitor(mUserPreferences, mPlaylistManager.getChannelProcessingManager(),
                 mTunerManager, headless);
@@ -251,7 +252,7 @@ public class SDRTrunk implements Listener<TunerEvent>
             try
             {
                 mWebServer = new SdrTrunkWebServer(mPlaylistManager, mTunerManager, mResourceMonitor,
-                    mUserPreferences, webAccessToken);
+                    mUserPreferences, webPassword);
                 mWebServer.start();
                 mPlaylistManager.getChannelProcessingManager().addAudioSegmentListener(
                     mWebServer.getAudioSegmentListener());
@@ -326,16 +327,29 @@ public class SDRTrunk implements Listener<TunerEvent>
         });
     }
 
-    private String getOrCreateWebAccessToken(boolean headless)
+    private String getOrCreateWebPassword(boolean headless)
     {
-        String environmentToken = System.getenv("SDRTRUNK_WEB_TOKEN");
+        String environmentToken = System.getenv("SDRTRUNK_WEB_PASSWORD");
+        if(environmentToken == null || environmentToken.isBlank())
+        {
+            environmentToken = System.getenv("SDRTRUNK_WEB_TOKEN");
+        }
 
         if(environmentToken != null && !environmentToken.isBlank())
         {
             return environmentToken.trim();
         }
 
-        String storedToken = mPreferences.get(PREFERENCE_WEB_ACCESS_TOKEN, null);
+        String storedToken = mPreferences.get(PREFERENCE_WEB_PASSWORD, null);
+        if(storedToken == null || storedToken.isBlank())
+        {
+            storedToken = mPreferences.get(PREFERENCE_WEB_ACCESS_TOKEN, null);
+            if(storedToken != null && !storedToken.isBlank())
+            {
+                mPreferences.put(PREFERENCE_WEB_PASSWORD, storedToken);
+                mPreferences.remove(PREFERENCE_WEB_ACCESS_TOKEN);
+            }
+        }
 
         if(storedToken != null && !storedToken.isBlank())
         {
@@ -347,8 +361,8 @@ public class SDRTrunk implements Listener<TunerEvent>
         if(!headless)
         {
             String enteredToken = (String)JOptionPane.showInputDialog(mMainGui,
-                "Create a token for browsers connecting to the sdrtrunk web interface.",
-                "Web Access Token Setup", JOptionPane.QUESTION_MESSAGE, null, null, generatedToken);
+                "Create a password for browsers connecting to the sdrtrunk web interface.",
+                "Web Console Password Setup", JOptionPane.QUESTION_MESSAGE, null, null, generatedToken);
 
             if(enteredToken != null && !enteredToken.isBlank())
             {
@@ -356,48 +370,57 @@ public class SDRTrunk implements Listener<TunerEvent>
             }
         }
 
-        mPreferences.put(PREFERENCE_WEB_ACCESS_TOKEN, generatedToken);
+        mPreferences.put(PREFERENCE_WEB_PASSWORD, generatedToken);
+        mPreferences.remove(PREFERENCE_WEB_ACCESS_TOKEN);
 
         if(headless)
         {
-            mLog.warn("Created first-run web access token: {}", generatedToken);
-            mLog.warn("Set SDRTRUNK_WEB_TOKEN before launch to override the stored token");
+            mLog.warn("Created first-run web console password: {}", generatedToken);
+            mLog.warn("Set SDRTRUNK_WEB_PASSWORD before launch to override the stored password");
         }
 
         return generatedToken;
     }
 
-    private void editWebAccessToken()
+    private void editWebPassword()
     {
-        String environmentToken = System.getenv("SDRTRUNK_WEB_TOKEN");
+        String environmentToken = System.getenv("SDRTRUNK_WEB_PASSWORD");
+        String environmentName = "SDRTRUNK_WEB_PASSWORD";
+        if(environmentToken == null || environmentToken.isBlank())
+        {
+            environmentToken = System.getenv("SDRTRUNK_WEB_TOKEN");
+            environmentName = "SDRTRUNK_WEB_TOKEN";
+        }
 
         if(environmentToken != null && !environmentToken.isBlank())
         {
             JOptionPane.showMessageDialog(mMainGui,
-                "The web token is currently controlled by the SDRTRUNK_WEB_TOKEN environment variable. " +
+                "The web password is currently controlled by the " + environmentName + " environment variable. " +
                     "Remove or change that variable before launching sdrtrunk to use the saved GUI setting.",
-                "Web Access Token", JOptionPane.INFORMATION_MESSAGE);
+                "Web Console Password", JOptionPane.INFORMATION_MESSAGE);
             return;
         }
 
-        String currentToken = mPreferences.get(PREFERENCE_WEB_ACCESS_TOKEN, "");
+        String currentToken = mPreferences.get(PREFERENCE_WEB_PASSWORD,
+            mPreferences.get(PREFERENCE_WEB_ACCESS_TOKEN, ""));
         String newToken = (String)JOptionPane.showInputDialog(mMainGui,
-            "Enter a replacement web access token:", "Web Access Token",
+            "Enter a replacement web console password:", "Web Console Password",
             JOptionPane.QUESTION_MESSAGE, null, null, currentToken);
 
         if(newToken != null && !newToken.isBlank())
         {
             newToken = newToken.trim();
-            mPreferences.put(PREFERENCE_WEB_ACCESS_TOKEN, newToken);
+            mPreferences.put(PREFERENCE_WEB_PASSWORD, newToken);
+            mPreferences.remove(PREFERENCE_WEB_ACCESS_TOKEN);
 
             if(mWebServer != null)
             {
-                mWebServer.setToken(newToken);
+                mWebServer.setPassword(newToken);
             }
 
             JOptionPane.showMessageDialog(mMainGui,
-                "The web access token was updated. Existing browsers must reconnect with the new token.",
-                "Web Access Token Updated", JOptionPane.INFORMATION_MESSAGE);
+                "The web console password was updated. Existing browser sessions have been signed out.",
+                "Web Console Password Updated", JOptionPane.INFORMATION_MESSAGE);
         }
     }
 
@@ -678,9 +701,9 @@ public class SDRTrunk implements Listener<TunerEvent>
         preferencesItem.addActionListener(e -> MyEventBus.getGlobalEventBus().post(new ViewUserPreferenceEditorRequest()));
         viewMenu.add(preferencesItem);
 
-        JMenuItem webAccessTokenItem = new JMenuItem("Web Access Token");
+        JMenuItem webAccessTokenItem = new JMenuItem("Web Console Password");
         webAccessTokenItem.setIcon(IconFontSwing.buildIcon(FontAwesome.KEY, 12));
-        webAccessTokenItem.addActionListener(e -> editWebAccessToken());
+        webAccessTokenItem.addActionListener(e -> editWebPassword());
         viewMenu.add(webAccessTokenItem);
 
         viewMenu.add(new JSeparator());

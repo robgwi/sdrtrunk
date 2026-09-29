@@ -4,9 +4,9 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.7.0-beta-17
+## Current release: 0.7.0-beta-18
 
-- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 17](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-17)
+- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 18](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-18)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Linux x86_64 installation guide](LINUX_X86_64.md)
 - [Local Whisper setup guide](WHISPER_SETUP.md)
@@ -29,8 +29,10 @@ The Raspberry Pi archive contains its own ARM64 Java and JavaFX runtime. A separ
 - Queues completed live calls in order and plays every call to completion before applying the configurable between-call hold time.
 - Shows the current call metadata, measured audio level, and number of waiting calls in the top scanner panel.
 - Lists and plays MP3/WAV recordings from the configured recording directory.
-- Shows tuner, channel, CPU, memory, and streaming-destination status.
-- Uses bearer-token authentication for non-local API requests.
+- Shows actual host CPU and memory usage, tuner/channel status, and streaming-destination state.
+- Provides a selectable live tuner spectrum and waterfall without interrupting active channel decoders.
+- Uses a password login and private browser session cookie; API clients can continue using `Authorization: Bearer <web-password>`.
+- Enables, disables, and restarts configured streaming destinations from the Streaming window.
 
 Signal strength is displayed as unavailable when a tuner does not expose calibrated RSSI through sdrtrunk's shared tuner interface. The dashboard does not fabricate a signal value.
 
@@ -62,7 +64,8 @@ Other advanced protocol-specific decoder fields, site/channel creation, conventi
 - Use **NBFM Squelch: Carrier / CTCSS / DCS** to select carrier squelch, a fixed CTCSS tone, a fixed DCS code, or CTCSS tone search.
 - Add CTCSS tones as first-class alias identifiers from the NBFM alias menu; tones survive playlist saves and alias cloning and resolve against decoded CTCSS identifiers.
 - Use **DCS Monitor / Code Search** from Additional Decoders when searching for an unknown DCS code.
-- Manage the web access token and restart the embedded web server from **Playlist Editor > Web Interface**.
+- Manage the web console password and restart the embedded web server from **Playlist Editor > Web Interface**.
+- View host CPU, host memory, and sdrtrunk JVM memory in the desktop **System** tab.
 
 ### Remote call API and transcription
 
@@ -93,25 +96,34 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-17.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-17
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-18.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-18
 bin/sdr-trunk
 ```
 
-Open `http://<raspberry-pi-address>:10000/` from another computer. A desktop/VNC first launch asks you to create a web access token. A first headless launch generates a token, saves it, and writes it once to the startup log.
+Open `http://<raspberry-pi-address>:10000/` from another computer. A desktop/VNC first launch asks you to create a web console password. A first headless launch generates a password, saves it, and writes it once to the startup log.
 
 To supply secrets through the launch environment instead:
 
 ```bash
-export SDRTRUNK_WEB_TOKEN='replace-with-a-long-random-token'
+export SDRTRUNK_WEB_PASSWORD='replace-with-a-long-random-password'
 export SDRTRUNK_REMOTE_API_KEY='remote-destination-key'
 export OPENAI_API_KEY='OpenAI-key'
 bin/sdr-trunk
 ```
 
-Environment variables override saved GUI token settings. Do not commit real keys or tokens to this repository.
+Environment variables override saved GUI password settings. The older `SDRTRUNK_WEB_TOKEN` name remains a compatibility fallback. Do not commit real passwords, keys, or tokens to this repository.
 
 ## Release history
+
+### 0.7.0-beta-18
+
+- Replaced the browser access-token field with a web console password login backed by expiring, HTTP-only session cookies; existing bearer clients remain compatible by using the password as the bearer credential.
+- Added a dedicated Streaming window that shows connection state, queue, sent/error counts, and enable, disable, and restart controls for every configured destination.
+- Added a selectable web spectrum and waterfall fed from the same tuner sample stream as the desktop display, without reserving the tuner or blocking channel decoding.
+- Changed web CPU and memory reporting to actual host utilization instead of load-average estimates and JVM heap figures.
+- Added a desktop **System** tab with host CPU, host RAM, logical processor count, JVM heap usage, operating system, and JVM uptime.
+- Migrates the prior saved web token automatically and retains `SDRTRUNK_WEB_TOKEN` as a legacy environment-variable fallback.
 
 ### 0.7.0-beta-17
 
