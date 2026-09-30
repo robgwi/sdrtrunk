@@ -644,22 +644,32 @@ public class RdioScannerBroadcaster extends AbstractAudioBroadcaster<RdioScanner
      */
     private String getTalkgroupLabel(AudioRecording audioRecording)
     {
-
         AliasList aliasList = mAliasModel.getAliasList(audioRecording.getIdentifierCollection());
         Identifier identifier = audioRecording.getIdentifierCollection().getToIdentifier();
 
-        StringBuilder sb = new StringBuilder();
-        if(identifier != null)
+        if(aliasList != null && identifier != null)
         {
             List<Alias> aliases = aliasList.getAliases(identifier);
-            if(!aliases.isEmpty())
+            for(Alias alias: aliases)
             {
-                sb.append(aliases.get(0));
+                if(alias != null && alias.getName() != null && !alias.getName().isBlank())
+                {
+                    return alias.getName();
+                }
             }
-
         }
-            
-        return sb.toString();
+
+        //Rdio Scanner calls this field a talkgroup label.  For an analog channel or an alias with no usable name,
+        //send the configured playlist channel name instead of leaving the label blank/Unknown.
+        Identifier channel = audioRecording.getIdentifierCollection().getIdentifier(
+            IdentifierClass.CONFIGURATION, Form.CHANNEL, Role.ANY);
+        if(channel == null)
+        {
+            channel = audioRecording.getIdentifierCollection().getIdentifier(
+                IdentifierClass.DECODER, Form.CHANNEL_NAME, Role.BROADCAST);
+        }
+
+        return channel != null ? channel.toString() : "";
     }
 
     /**

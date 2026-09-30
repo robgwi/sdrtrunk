@@ -4,9 +4,9 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.7.0-beta-19
+## Current release: 0.7.0-beta-20
 
-- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 19](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-19)
+- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 20](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-20)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Linux x86_64 installation guide](LINUX_X86_64.md)
 - [Local Whisper setup guide](WHISPER_SETUP.md)
@@ -96,8 +96,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-19.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-19
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-20.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-20
 bin/sdr-trunk
 ```
 
@@ -115,6 +115,12 @@ bin/sdr-trunk
 Environment variables override saved GUI password settings. The older `SDRTRUNK_WEB_TOKEN` name remains a compatibility fallback. Do not commit real passwords, keys, or tokens to this repository.
 
 ## Release history
+
+### 0.7.0-beta-20
+
+- Fixed AM and NBFM channel-name metadata so the configured Playlist channel name appears in the desktop Now Playing channel display.
+- Added the configured channel name to the web console's Live Traffic Scanner display and live-call metadata.
+- Made Rdio Scanner use the configured Playlist channel name as the talkgroup label fallback when no usable talkgroup alias name is available, preventing avoidable `Unknown` labels.
 
 ### 0.7.0-beta-19
 

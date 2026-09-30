@@ -42,7 +42,7 @@ Example body:
   "timestamp": 1790150400000,
   "timestampIso": "2026-09-23T08:00:00Z",
   "application": "sdrtrunk",
-  "version": "0.7.0-beta-19",
+  "version": "0.7.0-beta-20",
   "destination": "County Rdio",
   "hostname": "scanner-pi",
   "uptimeMs": 86400000,
