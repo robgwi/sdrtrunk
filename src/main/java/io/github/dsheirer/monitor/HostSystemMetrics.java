@@ -27,11 +27,21 @@ public final class HostSystemMetrics
         long freeMemory = -1;
         java.lang.management.OperatingSystemMXBean bean = ManagementFactory.getOperatingSystemMXBean();
 
-        if(bean instanceof com.sun.management.OperatingSystemMXBean operatingSystem)
+        try
         {
-            cpuLoad = operatingSystem.getCpuLoad();
-            totalMemory = operatingSystem.getTotalMemorySize();
-            freeMemory = operatingSystem.getFreeMemorySize();
+            //Load this optional JDK management interface reflectively so a reduced runtime can never prevent the
+            //desktop GUI from starting. Packaged distributions include jdk.management for the full measurements.
+            Class<?> operatingSystemType = Class.forName("com.sun.management.OperatingSystemMXBean");
+            if(operatingSystemType.isInstance(bean))
+            {
+                cpuLoad = ((Number)operatingSystemType.getMethod("getCpuLoad").invoke(bean)).doubleValue();
+                totalMemory = ((Number)operatingSystemType.getMethod("getTotalMemorySize").invoke(bean)).longValue();
+                freeMemory = ((Number)operatingSystemType.getMethod("getFreeMemorySize").invoke(bean)).longValue();
+            }
+        }
+        catch(ReflectiveOperationException | LinkageError ignored)
+        {
+            //The basic JVM and application remain usable; the UI reports unavailable host metrics.
         }
 
         return new Snapshot(cpuLoad, totalMemory, freeMemory,

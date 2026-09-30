@@ -4,9 +4,9 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.7.0-beta-18
+## Current release: 0.7.0-beta-19
 
-- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 18](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-18)
+- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 19](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-19)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Linux x86_64 installation guide](LINUX_X86_64.md)
 - [Local Whisper setup guide](WHISPER_SETUP.md)
@@ -96,8 +96,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-18.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-18
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-19.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-19
 bin/sdr-trunk
 ```
 
@@ -115,6 +115,12 @@ bin/sdr-trunk
 Environment variables override saved GUI password settings. The older `SDRTRUNK_WEB_TOKEN` name remains a compatibility fallback. Do not commit real passwords, keys, or tokens to this repository.
 
 ## Release history
+
+### 0.7.0-beta-19
+
+- Fixed the beta 18 packaged-runtime startup failure that could leave SDR and decoder worker threads running while the Java desktop window never appeared.
+- Added the `jdk.management` module to the Raspberry Pi ARM64 and Linux x86_64 runtimes so the new desktop System tab can read host CPU and memory information.
+- Made host-metric discovery optional and failure-safe, ensuring unavailable platform metrics can never prevent either the desktop GUI or web console from starting.
 
 ### 0.7.0-beta-18
 

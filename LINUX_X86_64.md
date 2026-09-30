@@ -14,8 +14,8 @@ Java 26 and JavaFX runtime, so a separate Java installation is not required.
 ```bash
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
-unzip sdr-trunk-linux-x86_64-v0.7.0-beta-18.zip
-cd sdr-trunk-linux-x86_64-v0.7.0-beta-18
+unzip sdr-trunk-linux-x86_64-v0.7.0-beta-19.zip
+cd sdr-trunk-linux-x86_64-v0.7.0-beta-19
 bin/sdr-trunk
 ```
 
