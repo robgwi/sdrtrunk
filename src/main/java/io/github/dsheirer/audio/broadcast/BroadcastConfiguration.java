@@ -94,6 +94,17 @@ public abstract class BroadcastConfiguration
     public abstract BroadcastConfiguration copyOf();
 
     /**
+     * Creates a complete copy that is safe to edit as a newly cloned destination.  Keeping a clone disabled prevents
+     * it from sending duplicate audio to the same endpoint before the user has changed its name or URL.
+     */
+    public BroadcastConfiguration copyOfDisabled()
+    {
+        BroadcastConfiguration copy = copyOf();
+        copy.setEnabled(false);
+        return copy;
+    }
+
+    /**
      * Broadcast audio streaming configuration.  Describes the streaming server and configuration details.
      */
     public BroadcastConfiguration(BroadcastFormat format)

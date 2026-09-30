@@ -102,4 +102,29 @@ class RdioScannerBroadcasterTest
         configuration.setHeartbeatEnabled(false);
         assertFalse(configuration.isHeartbeatEnabled());
     }
+
+    @Test
+    void createsDisabledCloneWithRdioSettingsIntact()
+    {
+        RdioScannerConfiguration configuration = new RdioScannerConfiguration();
+        configuration.setName("Primary Rdio");
+        configuration.setHost("https://scanner.example/api/call-upload");
+        configuration.setApiKey("secret");
+        configuration.setSystemID(19);
+        configuration.setHeartbeatEnabled(true);
+        configuration.setHeartbeatIntervalSeconds(30);
+        configuration.setHeartbeatUrl("https://scanner.example/status");
+        configuration.setEnabled(true);
+
+        RdioScannerConfiguration clone = (RdioScannerConfiguration)configuration.copyOfDisabled();
+
+        assertEquals(configuration.getName(), clone.getName());
+        assertEquals(configuration.getHost(), clone.getHost());
+        assertEquals(configuration.getApiKey(), clone.getApiKey());
+        assertEquals(configuration.getSystemID(), clone.getSystemID());
+        assertEquals(configuration.getHeartbeatUrl(), clone.getHeartbeatUrl());
+        assertEquals(configuration.getHeartbeatIntervalSeconds(), clone.getHeartbeatIntervalSeconds());
+        assertTrue(clone.isHeartbeatEnabled());
+        assertFalse(clone.isEnabled());
+    }
 }

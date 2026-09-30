@@ -18,6 +18,7 @@
  */
 package io.github.dsheirer.audio.broadcast;
 
+import io.github.dsheirer.alias.Alias;
 import io.github.dsheirer.alias.AliasModel;
 import io.github.dsheirer.alias.id.broadcast.BroadcastChannel;
 import io.github.dsheirer.audio.broadcast.remote.RemoteApiBroadcaster;
@@ -181,6 +182,35 @@ public class BroadcastModel extends AbstractTableModel implements Listener<Audio
         }
 
         return null;
+    }
+
+    /**
+     * Creates a disabled clone of a streaming destination, assigns it a unique name, and duplicates all alias routing
+     * selections that referenced the original destination.
+     */
+    public ConfiguredBroadcast cloneBroadcastConfiguration(BroadcastConfiguration configuration)
+    {
+        if(configuration == null)
+        {
+            return null;
+        }
+
+        String sourceName = configuration.getName();
+        BroadcastConfiguration copy = configuration.copyOfDisabled();
+        ConfiguredBroadcast cloned = addBroadcastConfiguration(copy);
+
+        if(cloned != null && mAliasModel != null && sourceName != null && copy.getName() != null)
+        {
+            for(Alias alias: mAliasModel.getAliases())
+            {
+                if(alias.hasBroadcastChannel(sourceName) && !alias.hasBroadcastChannel(copy.getName()))
+                {
+                    alias.addAliasID(new BroadcastChannel(copy.getName()));
+                }
+            }
+        }
+
+        return cloned;
     }
 
     /**

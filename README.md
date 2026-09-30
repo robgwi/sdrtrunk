@@ -4,9 +4,9 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.7.0-beta-20
+## Current release: 0.7.0-beta-21
 
-- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 20](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-20)
+- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 21](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-21)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Linux x86_64 installation guide](LINUX_X86_64.md)
 - [Local Whisper setup guide](WHISPER_SETUP.md)
@@ -96,8 +96,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-20.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-20
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-21.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-21
 bin/sdr-trunk
 ```
 
@@ -115,6 +115,13 @@ bin/sdr-trunk
 Environment variables override saved GUI password settings. The older `SDRTRUNK_WEB_TOKEN` name remains a compatibility fallback. Do not commit real passwords, keys, or tokens to this repository.
 
 ## Release history
+
+### 0.7.0-beta-21
+
+- Added a **Clone** action to the desktop Streaming editor and web Streaming window for duplicating any configured streaming destination.
+- Clones preserve destination-specific settings and alias/talkgroup routing, including Rdio Scanner credentials and heartbeat options, while starting disabled to prevent accidental duplicate uploads.
+- Expanded the desktop Rdio Scanner URL field to show the complete `/api/call-upload` endpoint.
+- Added a wide, wrapping URL column to the web Streaming window and widened the Remote Call API URL editor.
 
 ### 0.7.0-beta-20
 

@@ -74,14 +74,7 @@ public class RdioScannerEditor extends AbstractBroadcastEditor<RdioScannerConfig
         {
             getSystemIdTextField().set(item.getSystemID());
             getApiKeyTextField().setText(item.getApiKey());
-            String url = item.getHost();
-
-            if(url != null)
-            {
-                url = url.replace(API_PATH, "");
-            }
-
-            getHostTextField().setText(url);
+            getHostTextField().setText(item.getHost());
             getMaxAgeTextField().set((int)(item.getMaximumRecordingAge() / 1000));
             getHeartbeatEnabledToggleSwitch().setSelected(item.isHeartbeatEnabled());
             getHeartbeatIntervalTextField().set(item.getHeartbeatIntervalSeconds());
@@ -192,13 +185,9 @@ public class RdioScannerEditor extends AbstractBroadcastEditor<RdioScannerConfig
             GridPane.setConstraints(hostLabel, 0, ++row);
             mEditorPane.getChildren().add(hostLabel);
 
+            GridPane.setColumnSpan(getHostTextField(), 3);
             GridPane.setConstraints(getHostTextField(), 1, row);
             mEditorPane.getChildren().add(getHostTextField());
-
-            Label apiPath = new Label("/api/call-upload");
-            GridPane.setHalignment(apiPath, HPos.LEFT);
-            GridPane.setConstraints(apiPath, 2, row);
-            mEditorPane.getChildren().add(apiPath);
 
             Label maxAgeLabel = new Label("Max Recording Age (seconds)");
             GridPane.setHalignment(maxAgeLabel, HPos.RIGHT);
@@ -256,6 +245,7 @@ public class RdioScannerEditor extends AbstractBroadcastEditor<RdioScannerConfig
         if(mHostTextField == null)
         {
             mHostTextField = new TextField();
+            mHostTextField.setPrefColumnCount(45);
             mHostTextField.setDisable(true);
             mHostTextField.textProperty().addListener(mEditorModificationListener);
         }
