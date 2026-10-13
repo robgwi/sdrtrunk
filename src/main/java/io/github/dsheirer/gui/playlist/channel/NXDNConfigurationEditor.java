@@ -54,6 +54,7 @@ import javafx.geometry.Pos;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.Slider;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.SpinnerValueFactory;
 import javafx.scene.control.TableColumn;
@@ -63,6 +64,7 @@ import javafx.scene.control.ToggleButton;
 import javafx.scene.control.Tooltip;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import org.controlsfx.control.SegmentedButton;
 import org.controlsfx.control.ToggleSwitch;
@@ -94,6 +96,9 @@ public class NXDNConfigurationEditor extends ChannelConfigurationEditor
     private ToggleSwitch mIgnoreDataCallsToggle;
     private ToggleSwitch mIgnoreEncryptedCallsToggle;
     private ToggleSwitch mRecordUnknownSimplexCallsToggle;
+    private ToggleSwitch mJmbeAGCButton;
+    private Slider mJmbeToneGainSlider;
+    private Slider mJmbeNoiseGainSlider;
 
     /**
      * Constructs an instance
@@ -217,6 +222,24 @@ public class NXDNConfigurationEditor extends ChannelConfigurationEditor
 
             GridPane.setConstraints(editorBox, 0, row, 4, 1);
             gridPane.getChildren().add(editorBox);
+
+            row++;
+            Label jmbeLabel = new Label("AMBE Audio");
+            GridPane.setHalignment(jmbeLabel, HPos.LEFT);
+            gridPane.add(jmbeLabel, 0, row);
+
+            GridPane.setHalignment(getJmbeAGCButton(), HPos.LEFT);
+            gridPane.add(getJmbeAGCButton(), 1, row);
+
+            gridPane.add(new Label("Tone Volume:"), 2, row);
+
+            GridPane.setHgrow(getJmbeToneGainSlider(), Priority.ALWAYS);
+            gridPane.add(getJmbeToneGainSlider(), 3, row);
+
+            gridPane.add(new Label("Comfort Noise Volume:"), 4, row);
+
+            GridPane.setHgrow(getJmbeNoiseGainSlider(), Priority.ALWAYS);
+            gridPane.add(getJmbeNoiseGainSlider(), 5, row);
 
             mDecoderPane.setContent(gridPane);
         }
@@ -542,6 +565,45 @@ public class NXDNConfigurationEditor extends ChannelConfigurationEditor
         return mIgnoreEncryptedCallsToggle;
     }
 
+    public ToggleSwitch getJmbeAGCButton()
+    {
+        if(mJmbeAGCButton == null)
+        {
+            mJmbeAGCButton = new ToggleSwitch("AGC:");
+            mJmbeAGCButton.setTooltip(new Tooltip("Automatic Gain Control to automatically adjust call audio volume"));
+            mJmbeAGCButton.setDisable(true);
+            mJmbeAGCButton.selectedProperty().addListener((o, old, n) -> modifiedProperty().set(true));
+        }
+
+        return mJmbeAGCButton;
+    }
+
+    public Slider getJmbeToneGainSlider()
+    {
+        if(mJmbeToneGainSlider == null)
+        {
+            mJmbeToneGainSlider = new Slider(0.0, 1.0, 1.0);
+            mJmbeToneGainSlider.setTooltip(new Tooltip("Tone generation volume: 0.0 (no tones) to 1.0 (default)"));
+            mJmbeToneGainSlider.setDisable(true);
+            mJmbeToneGainSlider.valueProperty().addListener((observable, oldValue, newValue) -> modifiedProperty().set(true));
+        }
+
+        return mJmbeToneGainSlider;
+    }
+
+    public Slider getJmbeNoiseGainSlider()
+    {
+        if(mJmbeNoiseGainSlider == null)
+        {
+            mJmbeNoiseGainSlider = new Slider(0.0, 1.0, 1.0);
+            mJmbeNoiseGainSlider.setTooltip(new Tooltip("Comfort noise insertion volume: 0.0 (no noise) to 1.0 (default)"));
+            mJmbeNoiseGainSlider.setDisable(true);
+            mJmbeNoiseGainSlider.valueProperty().addListener((observable, oldValue, newValue) -> modifiedProperty().set(true));
+        }
+
+        return mJmbeNoiseGainSlider;
+    }
+
     /**
      * Toggle switch for recording conventional simplex calls containing unaliased radio IDs.
      */
@@ -606,20 +668,24 @@ public class NXDNConfigurationEditor extends ChannelConfigurationEditor
     @Override
     protected void setDecoderConfiguration(DecodeConfiguration config)
     {
-        getTransmissionModeButton().setDisable(config == null);
-        getTrafficChannelPoolSizeSpinner().setDisable(config == null);
+        boolean disable = config == null;
+        getTransmissionModeButton().setDisable(disable);
+        getTrafficChannelPoolSizeSpinner().setDisable(disable);
         getChannelMapTable().getItems().clear();
-        getChannelMapTable().setDisable(config == null);
-        getAddTimeslotFrequencyButton().setDisable(config == null);
+        getChannelMapTable().setDisable(disable);
+        getAddTimeslotFrequencyButton().setDisable(disable);
         getDeleteButton().setDisable(true);
         getChannelField().set(0);
         getChannelField().setDisable(true);
         getDownlinkFrequencyField().set(0);
         getDownlinkFrequencyField().setDisable(true);
-        getChannelRotationDelaySpinner().setDisable(config == null);
-        getIgnoreDataCallsToggle().setDisable(config == null);
-        getIgnoreEncryptedCallsToggle().setDisable(config == null);
-        getRecordUnknownSimplexCallsToggle().setDisable(config == null);
+        getChannelRotationDelaySpinner().setDisable(disable);
+        getIgnoreDataCallsToggle().setDisable(disable);
+        getIgnoreEncryptedCallsToggle().setDisable(disable);
+        getRecordUnknownSimplexCallsToggle().setDisable(disable);
+        getJmbeAGCButton().setDisable(disable);
+        getJmbeNoiseGainSlider().setDisable(disable);
+        getJmbeToneGainSlider().setDisable(disable);
 
         if(config instanceof DecodeConfigNXDN configNXDN)
         {
@@ -641,6 +707,9 @@ public class NXDNConfigurationEditor extends ChannelConfigurationEditor
             getIgnoreDataCallsToggle().setSelected(configNXDN.isIgnoreDataCalls());
             getIgnoreEncryptedCallsToggle().setSelected(configNXDN.isIgnoreEncryptedCalls());
             getRecordUnknownSimplexCallsToggle().setSelected(configNXDN.isRecordUnknownSimplexCalls());
+            getJmbeAGCButton().setSelected(configNXDN.isAGC());
+            getJmbeNoiseGainSlider().setValue(configNXDN.getNoiseGain());
+            getJmbeToneGainSlider().setValue(configNXDN.getToneGain());
         }
         else
         {
@@ -649,6 +718,9 @@ public class NXDNConfigurationEditor extends ChannelConfigurationEditor
             getIgnoreDataCallsToggle().setSelected(false);
             getIgnoreEncryptedCallsToggle().setSelected(false);
             getRecordUnknownSimplexCallsToggle().setSelected(false);
+            getJmbeAGCButton().setSelected(false);
+            getJmbeNoiseGainSlider().setValue(0);
+            getJmbeToneGainSlider().setValue(0);
         }
     }
 
@@ -682,6 +754,9 @@ public class NXDNConfigurationEditor extends ChannelConfigurationEditor
         config.setIgnoreDataCalls(getIgnoreDataCallsToggle().isSelected());
         config.setIgnoreEncryptedCalls(getIgnoreEncryptedCallsToggle().isSelected());
         config.setRecordUnknownSimplexCalls(getRecordUnknownSimplexCallsToggle().isSelected());
+        config.setAGC(getJmbeAGCButton().selectedProperty().getValue());
+        config.setNoiseGain((float)getJmbeNoiseGainSlider().getValue());
+        config.setToneGain((float)getJmbeToneGainSlider().getValue());
         getItem().setDecodeConfiguration(config);
     }
 
