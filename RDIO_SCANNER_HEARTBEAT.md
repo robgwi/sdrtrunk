@@ -42,7 +42,7 @@ Example body:
   "timestamp": 1790150400000,
   "timestampIso": "2026-09-23T08:00:00Z",
   "application": "sdrtrunk",
-  "version": "0.7.0-beta-21",
+  "version": "0.7.0-beta-22",
   "destination": "County Rdio",
   "hostname": "scanner-pi",
   "uptimeMs": 86400000,
@@ -66,8 +66,19 @@ Field meanings:
 - `queuedCalls`: completed calls currently waiting in the Rdio upload queue.
 
 Return any HTTP status from `200` through `299` to accept the heartbeat. Network errors, timeouts, and non-2xx
-responses put the destination into a temporary error state, replace the HTTP client, and retry with exponential
-backoff capped at 60 seconds or the configured heartbeat interval, whichever is shorter.
+responses replace the HTTP client and retry with exponential backoff capped at 60 seconds or the configured heartbeat
+interval, whichever is shorter. Heartbeat health is tracked separately and does not override the call-upload
+connection state.
+
+## Call upload recovery and durable queue
+
+Rdio Scanner call-upload connection checks retry indefinitely. The delay grows after consecutive failures and is
+capped at 60 seconds. A destination remains in a temporary retrying state instead of stopping permanently.
+
+Before an upload begins, sdrtrunk copies the completed audio and its Rdio metadata into a destination-specific queue
+under the configured `streaming/rdioscanner_queue` directory. Queue entries are removed only after Rdio Scanner returns
+`Call imported successfully.` or `duplicate call rejected`. The queue is retained when the destination is edited,
+disabled, re-enabled, or when sdrtrunk is restarted. Do not manually delete this directory while calls are pending.
 
 ## Node/Express receiver example
 

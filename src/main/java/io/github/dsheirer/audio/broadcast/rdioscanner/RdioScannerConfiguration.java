@@ -30,6 +30,8 @@ import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleIntegerProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
+import java.nio.charset.StandardCharsets;
+import java.util.UUID;
 
 /**
  * Streaming configuration for Rdio Scanner API.
@@ -44,6 +46,7 @@ public class RdioScannerConfiguration extends BroadcastConfiguration
     private BooleanProperty mHeartbeatEnabled = new SimpleBooleanProperty(false);
     private IntegerProperty mHeartbeatIntervalSeconds = new SimpleIntegerProperty(60);
     private StringProperty mHeartbeatUrl = new SimpleStringProperty();
+    private String mQueueId;
 
     /**
      * Constructor for faster jackson
@@ -156,6 +159,28 @@ public class RdioScannerConfiguration extends BroadcastConfiguration
         mHeartbeatUrl.set(heartbeatUrl);
     }
 
+    /**
+     * Stable identifier for the on-disk pending-call queue.  Older playlists do not contain this value, so a
+     * deterministic identifier is generated from the destination name and system ID and then written the next time
+     * the playlist is saved.
+     */
+    @JacksonXmlProperty(isAttribute = true, localName = "queue_id")
+    public String getQueueId()
+    {
+        if(mQueueId == null || mQueueId.isBlank())
+        {
+            String identity = String.valueOf(getName()) + "\u0000" + getSystemID();
+            mQueueId = UUID.nameUUIDFromBytes(identity.getBytes(StandardCharsets.UTF_8)).toString();
+        }
+
+        return mQueueId;
+    }
+
+    public void setQueueId(String queueId)
+    {
+        mQueueId = queueId;
+    }
+
     /** Uses an explicit heartbeat URL or derives /api/heartbeat from the configured call-upload URL. */
     public String resolveHeartbeatUrl()
     {
@@ -199,6 +224,7 @@ public class RdioScannerConfiguration extends BroadcastConfiguration
         copy.setHeartbeatEnabled(isHeartbeatEnabled());
         copy.setHeartbeatIntervalSeconds(getHeartbeatIntervalSeconds());
         copy.setHeartbeatUrl(getHeartbeatUrl());
+        //Do not copy the queue ID.  A cloned destination must have its own independent pending-call queue.
         return copy;
     }
 }

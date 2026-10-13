@@ -71,7 +71,8 @@ public class BroadcastFactory
                             inputAudioFormat, mp3Setting, aliasModel);
                 case RDIOSCANNER_CALL:
                     return new RdioScannerBroadcaster((RdioScannerConfiguration)configuration,
-                            inputAudioFormat, mp3Setting, aliasModel);
+                            inputAudioFormat, mp3Setting, aliasModel,
+                            userPreferences.getDirectoryPreference().getDirectoryStreaming());
                 case REMOTE_CALL_API:
                     return new RemoteApiBroadcaster((RemoteApiConfiguration)configuration);
                 case OPENMHZ:

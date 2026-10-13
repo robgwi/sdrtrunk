@@ -12,6 +12,8 @@ import io.github.dsheirer.audio.broadcast.BroadcastEvent;
 import io.github.dsheirer.audio.broadcast.ConfiguredBroadcast;
 import io.github.dsheirer.audio.broadcast.remote.RemoteApiBroadcaster;
 import io.github.dsheirer.audio.broadcast.remote.RemoteApiConfiguration;
+import io.github.dsheirer.audio.broadcast.rdioscanner.RdioScannerBroadcaster;
+import io.github.dsheirer.audio.broadcast.rdioscanner.RdioScannerConfiguration;
 import io.github.dsheirer.audio.AudioSegment;
 import io.github.dsheirer.audio.IAudioSegmentListener;
 import io.github.dsheirer.audio.convert.InputAudioFormat;
@@ -650,7 +652,11 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
             value.put("state", configured.broadcastStateProperty().get() != null ?
                 configured.broadcastStateProperty().get().name() : null);
             value.put("host", configuration.getHost());
-            value.put("queue", broadcaster != null ? broadcaster.getAudioQueueSize() : 0);
+            int queued = broadcaster != null ? broadcaster.getAudioQueueSize() :
+                configuration instanceof RdioScannerConfiguration rdio ?
+                    RdioScannerBroadcaster.getPersistedQueueSize(rdio,
+                        mUserPreferences.getDirectoryPreference().getDirectoryStreaming()) : 0;
+            value.put("queue", queued);
             value.put("sent", broadcaster != null ? broadcaster.getStreamedAudioCount() : 0);
             value.put("duplicateRejected", broadcaster != null ? broadcaster.getDuplicateRejectedAudioCount() : 0);
             value.put("errors", broadcaster != null ? broadcaster.getAudioErrorCount() : 0);

@@ -23,6 +23,8 @@ import io.github.dsheirer.alias.AliasModel;
 import io.github.dsheirer.alias.id.broadcast.BroadcastChannel;
 import io.github.dsheirer.audio.broadcast.remote.RemoteApiBroadcaster;
 import io.github.dsheirer.audio.broadcast.remote.RemoteApiConfiguration;
+import io.github.dsheirer.audio.broadcast.rdioscanner.RdioScannerBroadcaster;
+import io.github.dsheirer.audio.broadcast.rdioscanner.RdioScannerConfiguration;
 import io.github.dsheirer.icon.IconModel;
 import io.github.dsheirer.preference.UserPreferences;
 import io.github.dsheirer.properties.SystemProperties;
@@ -656,6 +658,12 @@ public class BroadcastModel extends AbstractTableModel implements Listener<Audio
                             if(configuredBroadcast.hasAudioBroadcaster())
                             {
                                 return configuredBroadcast.getAudioBroadcaster().getAudioQueueSize();
+                            }
+                            else if(configuredBroadcast.getBroadcastConfiguration() instanceof
+                                RdioScannerConfiguration rdio)
+                            {
+                                return RdioScannerBroadcaster.getPersistedQueueSize(rdio,
+                                    mUserPreferences.getDirectoryPreference().getDirectoryStreaming());
                             }
                             break;
                         case COLUMN_BROADCASTER_STREAMED_COUNT:

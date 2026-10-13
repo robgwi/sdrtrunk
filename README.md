@@ -4,9 +4,9 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.7.0-beta-21
+## Current release: 0.7.0-beta-22
 
-- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 21](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-21)
+- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 22](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-22)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Linux x86_64 installation guide](LINUX_X86_64.md)
 - [Local Whisper setup guide](WHISPER_SETUP.md)
@@ -77,6 +77,8 @@ Other advanced protocol-specific decoder fields, site/channel creation, conventi
 - Existing Rdio Scanner uploads continue to use `<Rdio Scanner URL>/api/call-upload`.
 - Rdio Scanner destinations can optionally POST authenticated JSON heartbeats to a derived `/api/heartbeat` endpoint
   or a separately configured URL.
+- Rdio Scanner reconnects indefinitely with bounded exponential backoff and keeps every unconfirmed completed call in
+  a disk-backed queue across outages, edits, disable/enable cycles, and application restarts.
 
 ### Background scanner transcription
 
@@ -96,8 +98,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-21.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-21
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-22.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-22
 bin/sdr-trunk
 ```
 
@@ -115,6 +117,19 @@ bin/sdr-trunk
 Environment variables override saved GUI password settings. The older `SDRTRUNK_WEB_TOKEN` name remains a compatibility fallback. Do not commit real passwords, keys, or tokens to this repository.
 
 ## Release history
+
+### 0.7.0-beta-22
+
+- Changed Rdio Scanner connection recovery to retry forever with exponential backoff capped at 60 seconds; a failed
+  attempt remains a temporary retrying state instead of becoming a terminal error.
+- Added a disk-backed Rdio Scanner call queue under the configured streaming directory. Unconfirmed calls now survive
+  endpoint outages, destination edits, disable/enable cycles, and complete sdrtrunk restarts.
+- Removed Rdio Scanner queue age-off during outages so a call remains queued until Rdio Scanner accepts it or rejects
+  it as a duplicate.
+- Kept pending queue counts visible in both the desktop Streaming editor and web console while a destination is disabled.
+- Guarded the queue worker against unexpected exceptions so one bad transaction cannot permanently stop reconnecting.
+- Separated heartbeat health from call-upload connection state, preventing a separate heartbeat endpoint from falsely
+  marking the Rdio call-upload service connected or disconnected.
 
 ### 0.7.0-beta-21
 
