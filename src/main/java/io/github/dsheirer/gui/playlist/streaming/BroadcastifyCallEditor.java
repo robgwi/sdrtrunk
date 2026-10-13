@@ -161,6 +161,7 @@ public class BroadcastifyCallEditor extends AbstractBroadcastEditor<Broadcastify
             GridPane.setConstraints(apiKeyLabel, 0, ++row);
             mEditorPane.getChildren().add(apiKeyLabel);
 
+            GridPane.setColumnSpan(getApiKeyTextField(), 4);
             GridPane.setConstraints(getApiKeyTextField(), 1, row);
             mEditorPane.getChildren().add(getApiKeyTextField());
 
@@ -240,6 +241,7 @@ public class BroadcastifyCallEditor extends AbstractBroadcastEditor<Broadcastify
         if(mApiKeyTextField == null)
         {
             mApiKeyTextField = new TextField();
+            mApiKeyTextField.setPrefColumnCount(45);
             mApiKeyTextField.setDisable(true);
             mApiKeyTextField.textProperty().addListener(mEditorModificationListener);
         }

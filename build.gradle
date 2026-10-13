@@ -396,7 +396,7 @@ tasks.register('runtimeZipOthers', RuntimeZipTask) {rt ->
  * password or SDRTRUNK_WEB_PASSWORD from the launch environment.
  *
  * Usage: ./gradlew runtimeZipRaspberryPi
- * Output: build/image/sdr-trunk-raspberry-pi-aarch64.zip
+ * Output: build/image/sdr-trunk-linux-aarch64-v<version>.zip
  */
 tasks.register('runtimeZipRaspberryPi', RuntimeZipTask) {rt ->
     if(file(jdk_linux_aarch64).exists()) {
@@ -409,8 +409,6 @@ tasks.register('runtimeZipRaspberryPi', RuntimeZipTask) {rt ->
     }
 
     configure(rt, jvmArgsLinux + ['-Dsdrtrunk.web.enabled=true', '-Dsdrtrunk.web.bind=0.0.0.0'])
-    rt.extension.imageZip.set(file(layout.buildDirectory.dir('image').get()
-        .file('sdr-trunk-raspberry-pi-aarch64.zip')))
 }
 
 /**

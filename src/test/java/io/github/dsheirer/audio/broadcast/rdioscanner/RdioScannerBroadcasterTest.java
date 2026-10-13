@@ -56,7 +56,7 @@ class RdioScannerBroadcasterTest
         RdioScannerConfiguration configuration = new RdioScannerConfiguration();
         configuration.setName("County Rdio");
         configuration.setHost("http://127.0.0.1:" + server.getAddress().getPort() + "/api/call-upload");
-        configuration.setApiKey("rdio-secret");
+        configuration.setApiKey("0123456789ABCDEF");
         configuration.setSystemID(42);
         configuration.setHeartbeatEnabled(true);
         configuration.setHeartbeatIntervalSeconds(5);
@@ -73,7 +73,7 @@ class RdioScannerBroadcasterTest
                 Thread.sleep(10);
             }
 
-            assertEquals("rdio-secret", apiKey.get());
+            assertEquals("0123456789ABCDEF", apiKey.get());
             assertEquals("42", systemId.get());
             assertEquals("heartbeat", event.get());
             assertTrue(body.get().contains("\"event\":\"heartbeat\""));

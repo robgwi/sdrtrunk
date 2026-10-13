@@ -169,6 +169,7 @@ public class RdioScannerEditor extends AbstractBroadcastEditor<RdioScannerConfig
             GridPane.setConstraints(apiKeyLabel, 0, ++row);
             mEditorPane.getChildren().add(apiKeyLabel);
 
+            GridPane.setColumnSpan(getApiKeyTextField(), 3);
             GridPane.setConstraints(getApiKeyTextField(), 1, row);
             mEditorPane.getChildren().add(getApiKeyTextField());
 
@@ -258,6 +259,7 @@ public class RdioScannerEditor extends AbstractBroadcastEditor<RdioScannerConfig
         if(mApiKeyTextField == null)
         {
             mApiKeyTextField = new TextField();
+            mApiKeyTextField.setPrefColumnCount(45);
             mApiKeyTextField.setDisable(true);
             mApiKeyTextField.textProperty().addListener(mEditorModificationListener);
         }

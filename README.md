@@ -4,9 +4,9 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.7.0-beta-23
+## Current release: 0.7.0-beta-24
 
-- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 23](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-23)
+- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 24](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-24)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Linux x86_64 installation guide](LINUX_X86_64.md)
 - [Local Whisper setup guide](WHISPER_SETUP.md)
@@ -113,8 +113,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-23.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-23
+unzip sdr-trunk-linux-aarch64-v0.7.0-beta-24.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-24
 bin/sdr-trunk
 ```
 
@@ -132,6 +132,15 @@ bin/sdr-trunk
 Environment variables override saved GUI password settings. The older `SDRTRUNK_WEB_TOKEN` name remains a compatibility fallback. Do not commit real passwords, keys, or tokens to this repository.
 
 ## Release history
+
+### 0.7.0-beta-24
+
+- Expanded the API-key controls in the Rdio Scanner, Broadcastify Calls, and OpenMHz desktop connection editors so
+  long keys remain visible while editing.
+- Expanded the Remote Calls web-console API-key control to the full width of its connection editor.
+- Verified with authenticated heartbeat tests that 16-character API keys are stored and transmitted without
+  truncation; sdrtrunk does not impose a fixed API-key length.
+- Standardized the Raspberry Pi release filename as `sdr-trunk-linux-aarch64-v<version>.zip`.
 
 ### 0.7.0-beta-23
 

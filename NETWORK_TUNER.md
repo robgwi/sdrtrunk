@@ -1,6 +1,6 @@
 # rtl_tcp Network Tuner Setup
 
-sdrtrunk 0.7.0 beta 23 can use an RTL-SDR attached to another Raspberry Pi or Linux computer. The remote computer
+sdrtrunk 0.7.0 beta 24 can use an RTL-SDR attached to another Raspberry Pi or Linux computer. The remote computer
 runs `rtl_tcp`; sdrtrunk receives the raw I/Q samples over the network and uses them like a local tuner.
 
 This feature is adapted from upstream pull request [DSheirer/sdrtrunk#2471](https://github.com/DSheirer/sdrtrunk/pull/2471)

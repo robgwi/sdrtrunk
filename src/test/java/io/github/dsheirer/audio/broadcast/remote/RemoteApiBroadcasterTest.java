@@ -46,7 +46,7 @@ class RemoteApiBroadcasterTest
         configuration.setName("Test Destination");
         configuration.setHost("http://127.0.0.1:" + server.getAddress().getPort() + "/calls");
         configuration.setApiKeyEnvironmentVariable("SDRTRUNK_TEST_MISSING_API_KEY");
-        configuration.setApiKey("secret");
+        configuration.setApiKey("0123456789ABCDEF");
         configuration.setHeartbeatEnabled(true);
         configuration.setHeartbeatIntervalSeconds(5);
         RemoteApiBroadcaster broadcaster = new RemoteApiBroadcaster(configuration);
@@ -60,7 +60,7 @@ class RemoteApiBroadcasterTest
                 Thread.sleep(10);
             }
 
-            assertEquals("Bearer secret", authorization.get());
+            assertEquals("Bearer 0123456789ABCDEF", authorization.get());
             assertEquals("heartbeat", event.get());
             assertTrue(body.get().contains("\"event\":\"heartbeat\""));
             assertTrue(body.get().contains("\"status\":\"online\""));
