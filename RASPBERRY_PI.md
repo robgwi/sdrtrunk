@@ -1,6 +1,6 @@
 # Raspberry Pi desktop and web build
 
-This distribution targets a Raspberry Pi 4 or 5 running a 64-bit Raspberry Pi OS (`aarch64`).  Java 26 and JavaFX
+This distribution targets a Raspberry Pi 4 or 5 running a 64-bit Raspberry Pi OS (`aarch64`).  Java 27 and JavaFX
 are included in the archive; Java does not need to be installed separately on the Pi.
 
 ## Install required system library
@@ -12,11 +12,11 @@ sudo apt install libusb-1.0-0
 
 ## Install and run
 
-Copy `sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-22.zip` to the Pi, then run:
+Copy `sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-23.zip` to the Pi, then run:
 
 ```bash
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-22.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-22
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-23.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-23
 export SDRTRUNK_WEB_PASSWORD='replace-with-a-long-random-password'
 bin/sdr-trunk
 ```

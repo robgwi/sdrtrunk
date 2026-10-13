@@ -32,13 +32,13 @@ import io.github.dsheirer.source.tuner.configuration.TunerConfiguration;
  */
 public class NetworkTunerConfiguration extends TunerConfiguration {
   private static final Logger mLog = LoggerFactory.getLogger(NetworkTunerConfiguration.class);
-  private String mHost;
-  private short mPort;
+  private String mHost = "localhost";
+  private int mPort = 1234;
   private boolean mBiasTEnabled = false;
   private int mGain = 0;
   private boolean mGainAuto = true;
   private long mSampleRate = 2_048_000;
-  private boolean mAutoReconnect = false;
+  private boolean mAutoReconnect = true;
 
   /**
    * Jackson constructor
@@ -73,11 +73,11 @@ public class NetworkTunerConfiguration extends TunerConfiguration {
   }
 
   @JacksonXmlProperty(isAttribute = true, localName = "port")
-  public short getPort() {
+  public int getPort() {
     return mPort;
   }
 
-  public void setPort(short port) {
+  public void setPort(int port) {
     mPort = port;
   }
 

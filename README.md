@@ -4,15 +4,16 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.7.0-beta-22
+## Current release: 0.7.0-beta-23
 
-- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 22](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-22)
+- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 23](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-23)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Linux x86_64 installation guide](LINUX_X86_64.md)
 - [Local Whisper setup guide](WHISPER_SETUP.md)
 - [Remote Call API and heartbeat guide](REMOTE_API.md)
 - [Rdio Scanner heartbeat integration guide](RDIO_SCANNER_HEARTBEAT.md)
 - [Official project update and integration guide](UPSTREAM_SYNC.md)
+- [rtl_tcp network tuner guide](NETWORK_TUNER.md)
 - [Upstream sdrtrunk wiki](https://github.com/DSheirer/sdrtrunk/wiki)
 
 The Raspberry Pi archive contains its own ARM64 Java and JavaFX runtime. A separate Java installation is not needed. It supports the Java desktop plus web console when launched from Raspberry Pi Desktop or VNC, and headless receiver plus web console when launched without a display or with `-Djava.awt.headless=true`.
@@ -67,6 +68,20 @@ Other advanced protocol-specific decoder fields, site/channel creation, conventi
 - Manage the web console password and restart the embedded web server from **Playlist Editor > Web Interface**.
 - View host CPU, host memory, and sdrtrunk JVM memory in the desktop **System** tab.
 
+### rtl_tcp network tuners
+
+- Add an RTL-SDR connected to another Raspberry Pi or computer as an `rtl_tcp` network tuner from the desktop
+  **Tuners** tab or the web console **System** window.
+- Configure the remote host, full 1-65535 port range, center frequency, sample rate, automatic/manual gain, Bias-T,
+  and continuous automatic reconnect.
+- Shows Connecting, Connected, Reconnecting, and error details in both interfaces and provides a manual reconnect.
+- Re-sends the complete tuner configuration after every reconnect and remembers whether the tuner was enabled or disabled.
+- Uses the same multi-channel channelizer and web spectrum/waterfall as a directly attached RTL-SDR.
+
+This support is adapted from upstream pull request [#2471](https://github.com/DSheirer/sdrtrunk/pull/2471), which is
+still under upstream review, so treat network tuners as experimental and keep the `rtl_tcp` connection on a trusted
+network. See [NETWORK_TUNER.md](NETWORK_TUNER.md) for setup and security notes.
+
 ### Remote call API and transcription
 
 - POST completed calls and metadata to a configurable API URL with an MP3 attachment.
@@ -98,8 +113,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-22.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-22
+unzip sdr-trunk-raspberry-pi-aarch64-linux-aarch64-v0.7.0-beta-23.zip
+cd sdr-trunk-linux-aarch64-v0.7.0-beta-23
 bin/sdr-trunk
 ```
 
@@ -117,6 +132,21 @@ bin/sdr-trunk
 Environment variables override saved GUI password settings. The older `SDRTRUNK_WEB_TOKEN` name remains a compatibility fallback. Do not commit real passwords, keys, or tokens to this repository.
 
 ## Release history
+
+### 0.7.0-beta-23
+
+- Converged the fork with seven official sdrtrunk updates through upstream commit `0460f2b7`, retaining the web
+  console, dual-architecture packaging, NXDN unknown-simplex recording, Remote Calls, Rdio Scanner recovery, and
+  transcription changes.
+- Updated to Java 27, Gradle 9.8.1, and JMBE API 2.0; added per-protocol JMBE automatic gain control, tone gain, and
+  noise gain controls for P25, DMR, and NXDN plus improved JMBE creator diagnostics.
+- Integrated the official P25 Phase 1 excessive-audio-gain correction and theme-aware main-window/Playlist Editor
+  icons, including the Material Deep Ocean theme fix.
+- Adapted experimental `rtl_tcp` network-tuner support from upstream pull request #2471 with desktop add/remove and
+  tuning controls, saved host/port/sample-rate/gain/Bias-T settings, and normal sdrtrunk channel/spectrum support.
+- Hardened network tuners with full-range ports, handshake timeouts, socket keepalive, immediate clean shutdown,
+  indefinite bounded reconnects by default, complete configuration replay, and visible connection/retry errors.
+- Added matching web-console network-tuner status, add, enable/disable, reconnect, delete, and spectrum selection.
 
 ### 0.7.0-beta-22
 

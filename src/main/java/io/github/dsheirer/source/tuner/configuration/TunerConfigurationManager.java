@@ -234,7 +234,7 @@ public class TunerConfigurationManager implements IDiscoveredTunerStatusListener
      * Removes the tuner from the disabled tuners list
      * @param discoveredTuner to remove
      */
-    private void removeDisabledTuner(DiscoveredTuner discoveredTuner)
+    public void removeDisabledTuner(DiscoveredTuner discoveredTuner)
     {
         mLock.lock();
 

@@ -49,6 +49,7 @@ public class NetworkTunerController extends TunerController {
 
   private static final int HANDSHAKE_LENGTH = 12;
   private static final int CONNECT_TIMEOUT_MS = 5000;
+  private static final int HANDSHAKE_TIMEOUT_MS = 5000;
   private static final int READ_BUFFER_SIZE = 65536; //bytes - matches RTL2832's USB transfer buffer size
   //ByteNativeBuffer's iterator consumes 8192 complex (I/Q) samples per fragment, i.e. 16384 bytes, so buffers
   //broadcast to it must be an even multiple of 16384 bytes, not just 8192.
@@ -73,13 +74,38 @@ public class NetworkTunerController extends TunerController {
 
   private final ByteNativeBufferFactory mNativeBufferFactory = new ByteNativeBufferFactory();
   private volatile OutputStream mOutputStream;
+  private volatile Socket mSocket;
   private volatile boolean mRunning;
+  private volatile ConnectionState mConnectionState = ConnectionState.STOPPED;
+  private volatile String mLastConnectionError;
+  private volatile int mReconnectAttempt;
+  private volatile boolean mReconnectRequested;
+  private final Object mReconnectMonitor = new Object();
   private Thread mConnectionThread;
+
+  public enum ConnectionState {
+    STOPPED("Stopped"),
+    CONNECTING("Connecting"),
+    CONNECTED("Connected"),
+    RECONNECTING("Reconnecting"),
+    ERROR("Error");
+
+    private final String mLabel;
+
+    ConnectionState(String label) {
+      mLabel = label;
+    }
+
+    @Override
+    public String toString() {
+      return mLabel;
+    }
+  }
 
   public NetworkTunerController(ITunerErrorListener tunerErrorListener, NetworkTunerConfiguration config) {
     super(tunerErrorListener);
     mHost = config.getHost();
-    mPort = config.getPort() & 0xFFFF; //port is stored as a signed short - treat as unsigned
+    mPort = config.getPort();
     mCenterFrequency = config.getFrequency();
     if (mCenterFrequency == 0) {
       mCenterFrequency = 100000000; // Default to 100 MHz if no frequency is provided
@@ -108,6 +134,9 @@ public class NetworkTunerController extends TunerController {
     mFrequencyController.setSampleRate((int) mSampleRate);
 
     mRunning = true;
+    mConnectionState = ConnectionState.CONNECTING;
+    mLastConnectionError = null;
+    mReconnectAttempt = 0;
     mConnectionThread = new Thread(this::runConnectionLoop, "network-tuner-" + mHost + ":" + mPort);
     mConnectionThread.setDaemon(true);
     mConnectionThread.start();
@@ -116,9 +145,16 @@ public class NetworkTunerController extends TunerController {
   @Override
   public void stop() {
     mRunning = false;
+    mConnectionState = ConnectionState.STOPPED;
 
     Thread thread = mConnectionThread;
     mConnectionThread = null;
+
+    closeSocket();
+
+    synchronized (mReconnectMonitor) {
+      mReconnectMonitor.notifyAll();
+    }
 
     if (thread != null) {
       thread.interrupt();
@@ -136,6 +172,7 @@ public class NetworkTunerController extends TunerController {
 
     while (mRunning) {
       try {
+        mConnectionState = attempt == 0 ? ConnectionState.CONNECTING : ConnectionState.RECONNECTING;
         connectAndStream();
         attempt = 0;
       } catch (IOException ioe) {
@@ -145,6 +182,8 @@ public class NetworkTunerController extends TunerController {
 
         if (!mAutoReconnect) {
           mLog.error("Network tuner [" + mHost + ":" + mPort + "] connection error", ioe);
+          mConnectionState = ConnectionState.ERROR;
+          mLastConnectionError = ioe.getMessage();
           setErrorMessage("Error - " + ioe.getMessage());
           mRunning = false;
           return;
@@ -152,17 +191,27 @@ public class NetworkTunerController extends TunerController {
 
         long delay = RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length - 1)];
         attempt++;
+        mReconnectAttempt = attempt;
+        mConnectionState = ConnectionState.RECONNECTING;
+        mLastConnectionError = ioe.getMessage();
         mLog.warn("Network tuner [" + mHost + ":" + mPort + "] disconnected - reconnecting in " + delay
             + " ms - " + ioe.getMessage());
 
         try {
-          Thread.sleep(delay);
+          synchronized (mReconnectMonitor) {
+            if (!mReconnectRequested && mRunning) {
+              mReconnectMonitor.wait(delay);
+            }
+            mReconnectRequested = false;
+          }
         } catch (InterruptedException ie) {
           Thread.currentThread().interrupt();
           return;
         }
       }
     }
+
+    mConnectionState = ConnectionState.STOPPED;
   }
 
   /**
@@ -171,13 +220,18 @@ public class NetworkTunerController extends TunerController {
    */
   private void connectAndStream() throws IOException {
     try (Socket socket = new Socket()) {
+      mSocket = socket;
       socket.connect(new InetSocketAddress(mHost, mPort), CONNECT_TIMEOUT_MS);
+      socket.setKeepAlive(true);
+      socket.setTcpNoDelay(true);
+      socket.setSoTimeout(HANDSHAKE_TIMEOUT_MS);
 
       InputStream in = socket.getInputStream();
       OutputStream out = socket.getOutputStream();
       mOutputStream = out;
 
       readAndValidateHandshake(in);
+      socket.setSoTimeout(0);
 
       sendCommand(out, CMD_SET_SAMPLE_RATE, (int) mSampleRate);
       sendCommand(out, CMD_SET_FREQUENCY, (int) mCenterFrequency);
@@ -188,6 +242,9 @@ public class NetworkTunerController extends TunerController {
       sendCommand(out, CMD_SET_BIAS_TEE, mBiasTEnabled ? 1 : 0);
 
       mLog.info("Network tuner connected [" + mHost + ":" + mPort + "]");
+      mConnectionState = ConnectionState.CONNECTED;
+      mLastConnectionError = null;
+      mReconnectAttempt = 0;
 
       byte[] readBuffer = new byte[READ_BUFFER_SIZE];
       byte[] pending = new byte[0]; //leftover bytes (< FRAGMENT_SIZE) carried over from the previous read
@@ -213,6 +270,20 @@ public class NetworkTunerController extends TunerController {
       }
     } finally {
       mOutputStream = null;
+      mSocket = null;
+    }
+  }
+
+  private void closeSocket() {
+    Socket socket = mSocket;
+    mSocket = null;
+
+    if (socket != null) {
+      try {
+        socket.close();
+      } catch (IOException ioe) {
+        mLog.debug("Error closing network tuner socket", ioe);
+      }
     }
   }
 
@@ -257,8 +328,10 @@ public class NetworkTunerController extends TunerController {
   }
 
   private void sendCommand(OutputStream out, int commandId, int parameter) throws IOException {
-    out.write(encodeCommand(commandId, parameter));
-    out.flush();
+    synchronized (out) {
+      out.write(encodeCommand(commandId, parameter));
+      out.flush();
+    }
   }
 
   /**
@@ -272,8 +345,37 @@ public class NetworkTunerController extends TunerController {
       try {
         sendCommand(out, commandId, parameter);
       } catch (IOException ioe) {
-        mLog.error("Error sending command [" + commandId + "] to network tuner", ioe);
-        setErrorMessage("Error sending command to network tuner - " + ioe.getMessage());
+        mLog.warn("Error sending command [" + commandId + "] to network tuner; reconnecting", ioe);
+        mLastConnectionError = ioe.getMessage();
+        mConnectionState = mAutoReconnect ? ConnectionState.RECONNECTING : ConnectionState.ERROR;
+        closeSocket();
+      }
+    }
+  }
+
+  public ConnectionState getConnectionState() {
+    return mConnectionState;
+  }
+
+  public String getLastConnectionError() {
+    return mLastConnectionError;
+  }
+
+  public int getReconnectAttempt() {
+    return mReconnectAttempt;
+  }
+
+  /**
+   * Drops the current socket so the connection loop immediately establishes a fresh rtl_tcp session. All current
+   * tuning, sample-rate and gain settings are sent again after the new handshake.
+   */
+  public void reconnect() {
+    if (mRunning) {
+      mReconnectRequested = true;
+      mConnectionState = ConnectionState.RECONNECTING;
+      closeSocket();
+      synchronized (mReconnectMonitor) {
+        mReconnectMonitor.notifyAll();
       }
     }
   }

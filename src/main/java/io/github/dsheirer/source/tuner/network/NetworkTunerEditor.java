@@ -25,6 +25,7 @@ import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JSeparator;
 import javax.swing.JToggleButton;
+import javax.swing.Timer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,12 +52,15 @@ public class NetworkTunerEditor extends TunerEditor<NetworkTuner, NetworkTunerCo
   private JCheckBox mGainAutoCheckBox;
   private JComboBox<Integer> mGainCombo;
   private JCheckBox mAutoReconnectCheckBox;
+  private final Timer mConnectionStatusTimer;
 
   public NetworkTunerEditor(UserPreferences userPreferences, TunerManager tunerManager,
       DiscoveredTuner discoveredTuner) {
     super(userPreferences, tunerManager, discoveredTuner);
     init();
     tunerStatusUpdated();
+    mConnectionStatusTimer = new Timer(1000, event -> updateStatusLabel());
+    mConnectionStatusTimer.start();
   }
 
   @Override
@@ -87,11 +91,7 @@ public class NetworkTunerEditor extends TunerEditor<NetworkTuner, NetworkTunerCo
       getTunerIdLabel().setText(getDiscoveredTuner().getId());
     }
 
-    String status = getDiscoveredTuner().getTunerStatus().toString();
-    if (getDiscoveredTuner().hasErrorMessage()) {
-      status += " - " + getDiscoveredTuner().getErrorMessage();
-    }
-    getTunerStatusLabel().setText(status);
+    updateStatusLabel();
     getButtonPanel().updateControls();
     getFrequencyPanel().updateControls();
 
@@ -111,6 +111,34 @@ public class NetworkTunerEditor extends TunerEditor<NetworkTuner, NetworkTunerCo
     }
 
     setLoading(false);
+  }
+
+  private void updateStatusLabel() {
+    StringBuilder status = new StringBuilder(getDiscoveredTuner().getTunerStatus().toString());
+
+    if (hasTuner()) {
+      NetworkTunerController controller = getTuner().getTunerController();
+      status.append(" - ").append(controller.getConnectionState());
+
+      if (controller.getConnectionState() == NetworkTunerController.ConnectionState.RECONNECTING) {
+        status.append(" (attempt ").append(controller.getReconnectAttempt()).append(')');
+      }
+
+      if (controller.getLastConnectionError() != null &&
+          controller.getConnectionState() != NetworkTunerController.ConnectionState.CONNECTED) {
+        status.append(" - ").append(controller.getLastConnectionError());
+      }
+    } else if (getDiscoveredTuner().hasErrorMessage()) {
+      status.append(" - ").append(getDiscoveredTuner().getErrorMessage());
+    }
+
+    getTunerStatusLabel().setText(status.toString());
+  }
+
+  @Override
+  public void dispose() {
+    mConnectionStatusTimer.stop();
+    super.dispose();
   }
 
   private void init() {

@@ -22,12 +22,17 @@ package io.github.dsheirer.source.tuner.network;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.nio.ByteBuffer;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import io.github.dsheirer.source.tuner.ITunerErrorListener;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
@@ -78,18 +83,86 @@ public class NetworkTunerControllerTest {
         assertThrows(IOException.class, () -> controller.readAndValidateHandshake(in));
     }
 
+    @Test
+    public void testConfigurationDefaultsToContinuousReconnect() {
+        NetworkTunerConfiguration config = NetworkTunerConfiguration.create();
+        assertEquals("localhost", config.getHost());
+        assertEquals(1234, config.getPort());
+        assertTrue(config.isAutoReconnect());
+    }
+
+    @Test
+    public void testConfigurationSupportsFullTcpPortRange() {
+        NetworkTunerConfiguration config = NetworkTunerConfiguration.create();
+        config.setPort(65535);
+        assertEquals(65535, config.getPort());
+    }
+
+    @Test
+    public void testControllerConnectsAndStopClosesBlockedSocket() throws Exception {
+        try (ServerSocket server = new ServerSocket(0)) {
+            CountDownLatch configured = new CountDownLatch(1);
+            CountDownLatch disconnected = new CountDownLatch(1);
+            Thread serverThread = Thread.ofVirtual().start(() -> {
+                try (Socket client = server.accept()) {
+                    client.getOutputStream().write(new byte[]{'R', 'T', 'L', '0', 0, 0, 0, 0, 0, 0, 0, 1});
+                    client.getOutputStream().flush();
+                    client.getInputStream().readNBytes(25); //sample-rate, frequency, gain-mode, gain and Bias-T commands
+                    configured.countDown();
+                    if (client.getInputStream().read() == -1) {
+                        disconnected.countDown();
+                    }
+                } catch (IOException ioe) {
+                    disconnected.countDown();
+                }
+            });
+
+            NetworkTunerConfiguration config = NetworkTunerConfiguration.create();
+            config.setHost("127.0.0.1");
+            config.setPort(server.getLocalPort());
+            config.setGainAuto(false);
+            NetworkTunerController controller = new NetworkTunerController(new TestErrorListener(), config);
+
+            try {
+                controller.start();
+                assertTrue(configured.await(5, TimeUnit.SECONDS));
+                assertTrue(awaitState(controller, NetworkTunerController.ConnectionState.CONNECTED));
+                controller.stop();
+                assertTrue(disconnected.await(5, TimeUnit.SECONDS));
+                assertEquals(NetworkTunerController.ConnectionState.STOPPED, controller.getConnectionState());
+            } finally {
+                controller.stop();
+                serverThread.join(5000);
+            }
+        }
+    }
+
     private static NetworkTunerController createController() {
         NetworkTunerConfiguration config = NetworkTunerConfiguration.create();
         config.setHost("localhost");
-        config.setPort((short) 1234);
-        return new NetworkTunerController(new ITunerErrorListener() {
-            @Override
-            public void setErrorMessage(String errorMessage) {
-            }
+        config.setPort(1234);
+        return new NetworkTunerController(new TestErrorListener(), config);
+    }
 
-            @Override
-            public void tunerRemoved() {
+    private static boolean awaitState(NetworkTunerController controller,
+                                      NetworkTunerController.ConnectionState expected) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (System.nanoTime() < deadline) {
+            if (controller.getConnectionState() == expected) {
+                return true;
             }
-        }, config);
+            Thread.sleep(10);
+        }
+        return false;
+    }
+
+    private static class TestErrorListener implements ITunerErrorListener {
+        @Override
+        public void setErrorMessage(String errorMessage) {
+        }
+
+        @Override
+        public void tunerRemoved() {
+        }
     }
 }

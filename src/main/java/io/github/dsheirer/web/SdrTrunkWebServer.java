@@ -59,8 +59,12 @@ import io.github.dsheirer.rrapi.type.TalkgroupCategory;
 import io.github.dsheirer.service.radioreference.RadioReference;
 import io.github.dsheirer.playlist.PlaylistManager;
 import io.github.dsheirer.source.tuner.Tuner;
+import io.github.dsheirer.source.tuner.manager.DiscoveredNetworkTuner;
 import io.github.dsheirer.source.tuner.manager.DiscoveredTuner;
 import io.github.dsheirer.source.tuner.manager.TunerManager;
+import io.github.dsheirer.source.tuner.network.NetworkTuner;
+import io.github.dsheirer.source.tuner.network.NetworkTunerConfiguration;
+import io.github.dsheirer.source.tuner.network.NetworkTunerController;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -580,15 +584,77 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
 
     private void tuners(HttpExchange exchange) throws IOException
     {
+        if("POST".equals(exchange.getRequestMethod()))
+        {
+            JsonObject request = GSON.fromJson(new String(exchange.getRequestBody().readAllBytes(),
+                StandardCharsets.UTF_8), JsonObject.class);
+            try
+            {
+                String action = requiredString(request, "action");
+                if("add".equalsIgnoreCase(action))
+                {
+                    String host = requiredString(request, "host").trim();
+                    int port = integerValue(request, "port", 1234);
+                    long frequency = request.has("frequency") ? request.get("frequency").getAsLong() : 100_000_000L;
+                    long sampleRate = request.has("sampleRate") ? request.get("sampleRate").getAsLong() : 2_048_000L;
+                    if(port < 1 || port > 65535) { throw new IllegalArgumentException("port must be from 1 to 65535"); }
+                    if(frequency < 1_000_000L || frequency > 3_000_000_000L)
+                    { throw new IllegalArgumentException("frequency must be from 1 MHz to 3 GHz"); }
+                    if(sampleRate < 230_400L || sampleRate > 2_880_000L)
+                    { throw new IllegalArgumentException("sample rate must be from 230400 to 2880000"); }
+                    String id = "RTL TCP " + host + ":" + port;
+                    if(mTunerManager.getDiscoveredTunerModel().getDiscoveredTuner(id) != null)
+                    { throw new IllegalArgumentException("network tuner already exists"); }
+                    NetworkTunerConfiguration configuration = NetworkTunerConfiguration.create();
+                    configuration.setHost(host);
+                    configuration.setPort(port);
+                    configuration.setFrequency(frequency);
+                    configuration.setSampleRate(sampleRate);
+                    configuration.setGainAuto(booleanValue(request, "gainAuto", true));
+                    configuration.setGain(integerValue(request, "gain", 0));
+                    configuration.setBiasTEnabled(booleanValue(request, "biasT", false));
+                    configuration.setAutoReconnect(booleanValue(request, "autoReconnect", true));
+                    mTunerManager.addNetworkTuner(configuration);
+                    json(exchange, 201, Map.of("added", id));
+                    return;
+                }
+
+                String id = requiredString(request, "id");
+                DiscoveredTuner discovered = mTunerManager.getDiscoveredTunerModel().getDiscoveredTuner(id);
+                if(discovered == null) { json(exchange, 404, Map.of("error", "tuner not found")); return; }
+                if("enable".equalsIgnoreCase(action)) { discovered.setEnabled(true); }
+                else if("disable".equalsIgnoreCase(action)) { discovered.setEnabled(false); }
+                else if("restart".equalsIgnoreCase(action))
+                {
+                    if(discovered.hasTuner() && discovered.getTuner() instanceof NetworkTuner networkTuner)
+                    { networkTuner.getTunerController().reconnect(); }
+                    else { discovered.restart(); }
+                }
+                else if("delete".equalsIgnoreCase(action))
+                {
+                    if(!mTunerManager.removeNetworkTuner(id))
+                    { json(exchange, 400, Map.of("error", "only network tuners can be deleted")); return; }
+                }
+                else { throw new IllegalArgumentException("action must be add, enable, disable, restart, or delete"); }
+                json(exchange, 200, Map.of("updated", id, "action", action));
+            }
+            catch(Exception e)
+            {
+                json(exchange, 400, Map.of("error", e.getMessage() != null ? e.getMessage() : "invalid tuner request"));
+            }
+            return;
+        }
         if(!"GET".equals(exchange.getRequestMethod())) { methodNotAllowed(exchange); return; }
         List<Map<String, Object>> result = new ArrayList<>();
-        for(DiscoveredTuner discovered: new ArrayList<>(mTunerManager.getAvailableTuners()))
+        for(DiscoveredTuner discovered: mTunerManager.getDiscoveredTunerModel().getDiscoveredTuners())
         {
             Map<String, Object> value = new LinkedHashMap<>();
             value.put("id", discovered.getId());
             value.put("status", discovered.getTunerStatus().name());
             value.put("class", discovered.getTunerClass().name());
             value.put("error", discovered.getErrorMessage());
+            value.put("enabled", discovered.isEnabled());
+            value.put("network", discovered instanceof DiscoveredNetworkTuner);
             if(discovered.hasTuner())
             {
                 Tuner tuner = discovered.getTuner();
@@ -597,6 +663,21 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
                 value.put("frequency", tuner.getTunerController().getFrequency());
                 value.put("sampleRate", tuner.getTunerController().getSampleRate());
                 value.put("frequencyCorrection", tuner.getTunerController().getFrequencyCorrection());
+                if(tuner instanceof NetworkTuner networkTuner)
+                {
+                    NetworkTunerController controller = networkTuner.getTunerController();
+                    value.put("connection", controller.getConnectionState().name());
+                    value.put("connectionError", controller.getLastConnectionError());
+                    value.put("reconnectAttempt", controller.getReconnectAttempt());
+                }
+            }
+            else if(discovered.getTunerConfiguration() instanceof NetworkTunerConfiguration configuration)
+            {
+                value.put("name", discovered.getId());
+                value.put("type", "RTL_TCP");
+                value.put("frequency", configuration.getFrequency());
+                value.put("sampleRate", configuration.getSampleRate());
+                value.put("connection", "STOPPED");
             }
             result.add(value);
         }
@@ -1561,7 +1642,7 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         <section class="scanner"><h2>Live Traffic Scanner</h2><div class="scanner-line"><div><div class="muted">SCANNER</div><div id="scanState" class="scan-state">SCANNING</div></div><div><div class="muted">CHANNEL NAME</div><div class="value" id="activeChannel">—</div></div><div><div class="muted">TALKGROUP ID</div><div class="value" id="activeTalkgroup">—</div></div><div><div class="muted">TALKGROUP ALIAS</div><div class="value" id="activeAlias">—</div></div><div><div class="muted">FREQUENCY</div><div class="value" id="activeFrequency">—</div></div><div><div class="muted">SOURCE RADIO</div><div class="value" id="activeSource">—</div></div><div><div class="muted">RF SIGNAL</div><div id="signalText">Unavailable</div></div><div><div class="muted">AUDIO LEVEL</div><div id="audioLevelText">—</div><div class="meter"><span id="signalMeter" style="width:0"></span></div></div></div><p><button id="liveToggle">Start Live Listening</button> <span id="liveStatus" class="muted">Off</span></p><audio id="audioPlayer" controls></audio></section>
         <section id="liveTranscriptPanel" class="live-transcript"><div class="transcript-head"><h2>Live Call Transcription</h2><span id="liveTranscriptStatus" class="muted">Whisper status loading…</span></div><div id="liveTranscriptMeta" class="transcript-meta">Waiting for a transcribed call</div><div id="liveTranscriptText" class="transcript-text">Transcribed radio traffic will appear here.</div></section>
         <div class="cards"><div class="card">CPU<div class="value" id="cpu">—</div></div><div class="card">Memory<div class="value" id="memory">—</div></div><div class="card">Tuners<div class="value" id="tunerCount">—</div></div><div class="card">Active channels<div class="value" id="activeCount">—</div></div></div>
-        <div class="grid"><section><h2>Tuners</h2><table><thead><tr><th>Name</th><th>Status</th><th>Frequency</th></tr></thead><tbody id="tuners"></tbody></table></section>
+        <div class="grid"><section><h2>Tuners <button onclick="openNetworkTunerEditor()">Add Network Tuner</button></h2><p class="muted">Add and manage rtl_tcp tuners shared over your network. Reconnecting sends the configured frequency, sample rate, gain, and Bias-T settings again.</p><table><thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Frequency</th><th>Control</th></tr></thead><tbody id="tuners"></tbody></table></section>
         <section><h2>Streaming destinations</h2><p class="muted">View connection state and safely enable, disable, restart, or clone configured destinations. Clones start disabled.</p><table><thead><tr><th>Name</th><th>Type</th><th class="stream-url">URL</th><th>State</th><th>Queue</th><th>Sent</th><th>Errors</th><th>Control</th></tr></thead><tbody id="streams"></tbody></table></section></div>
         <section id="spectrumSection"><h2>Live Spectrum &amp; Waterfall</h2><p><label>Tuner <select id="spectrumTuner"></select></label> <span id="spectrumStatus" class="muted">Open this window to begin.</span></p><canvas id="spectrumCanvas" class="spectrum-canvas" width="1050" height="280"></canvas><canvas id="waterfallCanvas" class="waterfall-canvas" width="1050" height="240"></canvas></section>
         <section><h2>Playlist Channels <button onclick="openChannelEditor()">New Channel</button></h2><table><thead><tr><th>System</th><th>Site</th><th>Name</th><th>Decoder</th><th>Status</th><th>Control</th></tr></thead><tbody id="channels"></tbody></table></section>
@@ -1645,12 +1726,16 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         function callStatus(x){const queue=x.queuedCalls?` • ${x.queuedCalls} queued${x.activeUploads?` (${x.activeUploads} sending)`:''}`:'';if(x.lastCallError)return`Retrying${queue} • ${x.lastCallError} • last sent ${eventTime(x.lastCallSuccess)}`;if(x.activeUploads)return`Sending${queue} • ${eventTime(x.lastCallAttempt)}`;if(x.lastCallSuccess)return`Sent ${eventTime(x.lastCallSuccess)}${queue}`;if(x.lastCallAttempt)return`Sending • ${eventTime(x.lastCallAttempt)}${queue}`;return`No calls sent yet${queue}`}
         async function reconnectRemote(name){const r=await fetch('/api/v1/remote-destinations',{method:'POST',headers:apiHeaders(true),body:JSON.stringify({action:'reconnect',originalName:name})}),j=await r.json();if(!r.ok)alert(j.error||'Reconnect failed');refresh()}
         async function manageStream(name,action){const r=await fetch('/api/v1/broadcasters',{method:'POST',headers:apiHeaders(true),body:JSON.stringify({name,action})}),j=await r.json();if(!r.ok)alert(j.error||'Streaming change failed');refresh()}
+        async function tunerRequest(body){const r=await fetch('/api/v1/tuners',{method:'POST',headers:apiHeaders(true),body:JSON.stringify(body)}),j=await r.json();if(!r.ok)throw Error(j.error||'Tuner change failed');refresh();return j}
+        async function openNetworkTunerEditor(){const host=prompt('rtl_tcp host or IP address','localhost');if(host===null)return;const port=prompt('rtl_tcp port','1234');if(port===null)return;const frequency=prompt('Initial center frequency in Hz','100000000');if(frequency===null)return;const sampleRate=prompt('Sample rate in samples/second','2048000');if(sampleRate===null)return;try{await tunerRequest({action:'add',host:host.trim(),port:Number(port),frequency:Number(frequency),sampleRate:Number(sampleRate),gainAuto:true,biasT:false,autoReconnect:true})}catch(e){alert(e.message)}}
+        async function manageTuner(id,action){if(action==='delete'&&!confirm('Delete network tuner '+id+'?'))return;try{await tunerRequest({id,action})}catch(e){alert(e.message)}}
+        function tunerStatusText(x){let value=x.status||'';if(x.network&&x.connection)value+=' • '+x.connection.toLowerCase();if(x.reconnectAttempt)value+=' '+x.reconnectAttempt;if(x.connectionError&&x.connection!=='CONNECTED')value+=' • '+x.connectionError;return value}
         function spectrumColor(value){const n=Math.max(0,Math.min(1,(value+130)/110));return `hsl(${240-n*240} 90% ${18+n*42}%)`}
         function drawSpectrum(data){const bins=data.bins||[],ctx=spectrumCanvas.getContext('2d'),w=spectrumCanvas.width,h=spectrumCanvas.height;ctx.fillStyle='#02070b';ctx.fillRect(0,0,w,h);ctx.strokeStyle='#17303c';ctx.lineWidth=1;for(let i=1;i<8;i++){ctx.beginPath();ctx.moveTo(i*w/8,0);ctx.lineTo(i*w/8,h);ctx.stroke()}for(let i=1;i<5;i++){ctx.beginPath();ctx.moveTo(0,i*h/5);ctx.lineTo(w,i*h/5);ctx.stroke()}if(!bins.length)return;ctx.strokeStyle='#53ffc1';ctx.lineWidth=1.5;ctx.beginPath();bins.forEach((v,i)=>{const x=i*w/(bins.length-1),y=h-Math.max(0,Math.min(1,(v+140)/150))*h;i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.stroke();const wf=waterfallCanvas.getContext('2d'),ww=waterfallCanvas.width,wh=waterfallCanvas.height;wf.drawImage(waterfallCanvas,0,0,ww,wh-1,0,1,ww,wh-1);bins.forEach((v,i)=>{wf.fillStyle=spectrumColor(v);wf.fillRect(i*ww/bins.length,0,Math.ceil(ww/bins.length),1)});spectrumStatus.textContent=`${data.name} • ${mhz(data.frequency)} • ${(data.sampleRate/1e6).toFixed(3)} MSPS`}
         async function refreshSpectrum(){if(!spectrumActive)return;try{const r=await fetch('/api/v1/spectrum?tuner='+encodeURIComponent(spectrumTuner.value),{headers:apiHeaders(false)});if(r.status===401){showLogin();return}const data=await r.json();if(data.available)drawSpectrum(data);else spectrumStatus.textContent='No active tuner is available'}catch(e){spectrumStatus.textContent=e.message}finally{if(spectrumActive)setTimeout(refreshSpectrum,350)}}
-        async function refresh(){const errors=[];const get=async(name,fallback)=>{try{const response=await fetch('/api/v1/'+name,{headers:apiHeaders(false)});const body=await response.json();if(!response.ok){if(response.status===401)showLogin();throw Error(response.status===401?'Sign in required':(body.error||'HTTP '+response.status))}return body}catch(e){errors.push(name+': '+e.message);return fallback}};try{const [s,t,c,b,r,a,tg,rd]=await Promise.all([get('status',{}),get('tuners',[]),get('channels',[]),get('broadcasters',[]),get('recordings',[]),get('activity',[]),get('talkgroups',[]),get('remote-destinations',[])]);cpu.textContent=s.cpuAvailable?(s.cpu<.005?'<1%':(s.cpu*100).toFixed(1)+'%'):'Unavailable';memory.textContent=s.memoryAvailable?mb(s.memoryUsed)+' / '+mb(s.memoryMaximum):'Unavailable';tunerCount.textContent=t.length;activeCount.textContent=c.filter(x=>x.processing).length;const selectedTuner=spectrumTuner.value;spectrumTuner.innerHTML=t.filter(x=>x.name).map(x=>`<option value="${esc(x.id)}" ${x.id===selectedTuner?'selected':''}>${esc(x.name||x.id)}</option>`).join('');
+        async function refresh(){const errors=[];const get=async(name,fallback)=>{try{const response=await fetch('/api/v1/'+name,{headers:apiHeaders(false)});const body=await response.json();if(!response.ok){if(response.status===401)showLogin();throw Error(response.status===401?'Sign in required':(body.error||'HTTP '+response.status))}return body}catch(e){errors.push(name+': '+e.message);return fallback}};try{const [s,t,c,b,r,a,tg,rd]=await Promise.all([get('status',{}),get('tuners',[]),get('channels',[]),get('broadcasters',[]),get('recordings',[]),get('activity',[]),get('talkgroups',[]),get('remote-destinations',[])]);cpu.textContent=s.cpuAvailable?(s.cpu<.005?'<1%':(s.cpu*100).toFixed(1)+'%'):'Unavailable';memory.textContent=s.memoryAvailable?mb(s.memoryUsed)+' / '+mb(s.memoryMaximum):'Unavailable';tunerCount.textContent=t.length;activeCount.textContent=c.filter(x=>x.processing).length;const selectedTuner=spectrumTuner.value;spectrumTuner.innerHTML=t.filter(x=>x.name&&x.enabled).map(x=>`<option value="${esc(x.id)}" ${x.id===selectedTuner?'selected':''}>${esc(x.name||x.id)}</option>`).join('');
         const current=a.length&&Date.now()-Math.max(Number(a[0].time)||0,Number(a[0].end)||0)<5000?a[0]:null;scanState.textContent=current?'RECEIVING':'SCANNING';scanState.className='scan-state'+(current?' receiving':'');if(current){activeChannel.textContent=current.channel||'';activeTalkgroup.textContent=current.talkgroup||'';activeAlias.textContent=current.alias&&current.alias!=='Unidentified'?current.alias:'';activeFrequency.textContent=current.frequency?mhz(current.frequency):'';activeSource.textContent=current.source||'';signalText.textContent=current.signalAvailable&&current.signalDbm!=null?current.signalDbm+' dBm':'';audioLevelText.textContent='';signalMeter.style.width='0'}else clearScanner()
-        channelCache=c.filter(x=>x.type==='STANDARD');talkgroupCache=tg;remoteCache=rd;tuners.innerHTML=t.map(x=>`<tr><td>${esc(x.name||x.id)}</td><td>${esc(x.status)}</td><td>${mhz(x.frequency)}</td></tr>`).join('');streams.innerHTML=b.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.type)}</td><td class="stream-url">${esc(x.host)}</td><td>${esc(x.state)}</td><td>${x.queue}</td><td>${x.sent}</td><td>${x.errors}</td><td><button onclick="manageStream(decodeURIComponent('${encodeURIComponent(x.name)}'),'${x.enabled?'disable':'enable'}')">${x.enabled?'Disable':'Enable'}</button> <button onclick="manageStream(decodeURIComponent('${encodeURIComponent(x.name)}'),'restart')" ${x.enabled?'':'disabled'}>Restart</button> <button onclick="manageStream(decodeURIComponent('${encodeURIComponent(x.name)}'),'clone')">Clone</button></td></tr>`).join('');channels.innerHTML=c.map(x=>`<tr><td>${esc(x.system)}</td><td>${esc(x.site)}</td><td>${esc(x.name)}</td><td>${esc(x.decoder)}</td><td>${x.processing?'Active':'Stopped'}</td><td><button onclick="control(decodeURIComponent('${encodeURIComponent(x.name)}'),'${x.processing?'stop':'start'}')">${x.processing?'Stop':'Start'}</button> ${x.type==='STANDARD'?`<button onclick="openChannelEditor(${x.id})">Edit</button> <button onclick="openTalkgroupEditor(null,decodeURIComponent('${encodeURIComponent(x.aliasList||'')}'))">Add TG</button>`:''}</td></tr>`).join('');talkgroups.innerHTML=tg.map(x=>`<tr><td>${esc(x.aliasList)}</td><td>${x.talkgroup}</td><td>${esc(x.name)}</td><td>${esc(x.group)}</td><td>${esc(x.protocol)}</td><td>${esc(x.ctcssLabel||'—')}</td><td>${x.record?'Yes':'No'}</td><td>${esc((x.remoteCalls||[]).join(', '))}</td><td><button onclick="openTalkgroupEditor(${x.id})">Edit</button></td></tr>`).join('');remoteDestinations.innerHTML=rd.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.url)}</td><td>${connectionStatus(x)}</td><td>${esc(heartbeatStatus(x))}</td><td>${esc(callStatus(x))}</td><td>${x.openAiEnabled?(x.translateToEnglish?'Translate':'Transcribe'):(x.localWhisperExecutable?'Local Whisper':'Off')}</td><td><button onclick="reconnectRemote(decodeURIComponent('${encodeURIComponent(x.name)}'))">Reconnect</button> <button onclick="openRemoteEditor(decodeURIComponent('${encodeURIComponent(x.name)}'))">Edit</button></td></tr>`).join('');recordings.innerHTML=r.map(x=>`<tr><td>${esc(x.name)}</td><td>${new Date(x.modified).toLocaleString()}</td><td>${mb(x.size)}</td><td><button onclick="playRecording(decodeURIComponent('${encodeURIComponent(x.name)}'))">Play</button></td></tr>`).join('');activity.innerHTML=a.slice(0,30).map(x=>`<tr><td>${new Date(x.time).toLocaleTimeString()}</td><td>${esc(x.talkgroup)}</td><td>${esc(x.alias||'Unidentified')}</td><td>${esc(x.source)}</td><td>${esc(x.protocol)}</td><td>${mhz(x.frequency)}</td><td>${esc(x.type)}</td></tr>`).join('');updated.textContent=errors.length?errors.join(' | '):'Updated '+new Date().toLocaleTimeString()}catch(e){updated.textContent=e.message}}refresh();setInterval(refresh,2000);
+        channelCache=c.filter(x=>x.type==='STANDARD');talkgroupCache=tg;remoteCache=rd;tuners.innerHTML=t.map(x=>`<tr><td>${esc(x.name||x.id)}</td><td>${esc(x.type||x.class)}</td><td>${esc(tunerStatusText(x))}</td><td>${mhz(x.frequency)}</td><td><button onclick="manageTuner(decodeURIComponent('${encodeURIComponent(x.id)}'),'${x.enabled?'disable':'enable'}')">${x.enabled?'Disable':'Enable'}</button> ${x.network?`<button onclick="manageTuner(decodeURIComponent('${encodeURIComponent(x.id)}'),'restart')" ${x.enabled?'':'disabled'}>Reconnect</button> <button onclick="manageTuner(decodeURIComponent('${encodeURIComponent(x.id)}'),'delete')">Delete</button>`:''}</td></tr>`).join('');streams.innerHTML=b.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.type)}</td><td class="stream-url">${esc(x.host)}</td><td>${esc(x.state)}</td><td>${x.queue}</td><td>${x.sent}</td><td>${x.errors}</td><td><button onclick="manageStream(decodeURIComponent('${encodeURIComponent(x.name)}'),'${x.enabled?'disable':'enable'}')">${x.enabled?'Disable':'Enable'}</button> <button onclick="manageStream(decodeURIComponent('${encodeURIComponent(x.name)}'),'restart')" ${x.enabled?'':'disabled'}>Restart</button> <button onclick="manageStream(decodeURIComponent('${encodeURIComponent(x.name)}'),'clone')">Clone</button></td></tr>`).join('');channels.innerHTML=c.map(x=>`<tr><td>${esc(x.system)}</td><td>${esc(x.site)}</td><td>${esc(x.name)}</td><td>${esc(x.decoder)}</td><td>${x.processing?'Active':'Stopped'}</td><td><button onclick="control(decodeURIComponent('${encodeURIComponent(x.name)}'),'${x.processing?'stop':'start'}')">${x.processing?'Stop':'Start'}</button> ${x.type==='STANDARD'?`<button onclick="openChannelEditor(${x.id})">Edit</button> <button onclick="openTalkgroupEditor(null,decodeURIComponent('${encodeURIComponent(x.aliasList||'')}'))">Add TG</button>`:''}</td></tr>`).join('');talkgroups.innerHTML=tg.map(x=>`<tr><td>${esc(x.aliasList)}</td><td>${x.talkgroup}</td><td>${esc(x.name)}</td><td>${esc(x.group)}</td><td>${esc(x.protocol)}</td><td>${esc(x.ctcssLabel||'—')}</td><td>${x.record?'Yes':'No'}</td><td>${esc((x.remoteCalls||[]).join(', '))}</td><td><button onclick="openTalkgroupEditor(${x.id})">Edit</button></td></tr>`).join('');remoteDestinations.innerHTML=rd.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.url)}</td><td>${connectionStatus(x)}</td><td>${esc(heartbeatStatus(x))}</td><td>${esc(callStatus(x))}</td><td>${x.openAiEnabled?(x.translateToEnglish?'Translate':'Transcribe'):(x.localWhisperExecutable?'Local Whisper':'Off')}</td><td><button onclick="reconnectRemote(decodeURIComponent('${encodeURIComponent(x.name)}'))">Reconnect</button> <button onclick="openRemoteEditor(decodeURIComponent('${encodeURIComponent(x.name)}'))">Edit</button></td></tr>`).join('');recordings.innerHTML=r.map(x=>`<tr><td>${esc(x.name)}</td><td>${new Date(x.modified).toLocaleString()}</td><td>${mb(x.size)}</td><td><button onclick="playRecording(decodeURIComponent('${encodeURIComponent(x.name)}'))">Play</button></td></tr>`).join('');activity.innerHTML=a.slice(0,30).map(x=>`<tr><td>${new Date(x.time).toLocaleTimeString()}</td><td>${esc(x.talkgroup)}</td><td>${esc(x.alias||'Unidentified')}</td><td>${esc(x.source)}</td><td>${esc(x.protocol)}</td><td>${mhz(x.frequency)}</td><td>${esc(x.type)}</td></tr>`).join('');updated.textContent=errors.length?errors.join(' | '):'Updated '+new Date().toLocaleTimeString()}catch(e){updated.textContent=e.message}}refresh();setInterval(refresh,2000);
         refreshTranscripts();setInterval(refreshTranscripts,3000);
         </script></body></html>""";
 }

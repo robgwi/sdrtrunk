@@ -67,6 +67,7 @@ public class TunerViewPanel extends JPanel
     private DiscoveredTunerModel mDiscoveredTunerModel;
     private DiscoveredTunerEditor mDiscoveredTunerEditor;
     private TunerConfigurationManager mTunerConfigurationManager;
+    private TunerManager mTunerManager;
     private JTable mTunerTable;
     private JTableColumnWidthMonitor mColumnWidthMonitor;
     private TableRowSorter<DiscoveredTunerModel> mRowSorter;
@@ -82,6 +83,7 @@ public class TunerViewPanel extends JPanel
      */
     public TunerViewPanel(TunerManager tunerManager, UserPreferences userPreferences)
     {
+        mTunerManager = tunerManager;
         mDiscoveredTunerModel = tunerManager.getDiscoveredTunerModel();
         mDiscoveredTunerEditor = new DiscoveredTunerEditor(userPreferences, tunerManager);
         mTunerConfigurationManager = tunerManager.getTunerConfigurationManager();
@@ -248,9 +250,16 @@ public class TunerViewPanel extends JPanel
                     if(selected instanceof DiscoveredRecordingTuner || selected instanceof DiscoveredNetworkTuner)
                     {
                         mLog.info("Removing Tuner: " + selected);
-                        selected.stop();
-                        mTunerConfigurationManager.removeTunerConfiguration(selected.getTunerConfiguration());
-                        EventQueue.invokeLater(() -> mDiscoveredTunerModel.removeDiscoveredTuner(selected));
+                        if(selected instanceof DiscoveredNetworkTuner)
+                        {
+                            mTunerManager.removeNetworkTuner(selected.getId());
+                        }
+                        else
+                        {
+                            selected.stop();
+                            mTunerConfigurationManager.removeTunerConfiguration(selected.getTunerConfiguration());
+                            EventQueue.invokeLater(() -> mDiscoveredTunerModel.removeDiscoveredTuner(selected));
+                        }
                     }
                 }
             });
@@ -266,7 +275,7 @@ public class TunerViewPanel extends JPanel
             mAddNetworkButton = new JButton("Add Network Tuner");
             mAddNetworkButton.addActionListener(e ->
             {
-                AddNetworkTunerDialog dialog = new AddNetworkTunerDialog(mUserPreferences, mDiscoveredTunerModel, mTunerConfigurationManager);
+                AddNetworkTunerDialog dialog = new AddNetworkTunerDialog(mTunerManager);
                 dialog.setLocationRelativeTo(TunerViewPanel.this);
                 EventQueue.invokeLater(() -> dialog.setVisible(true));
             });

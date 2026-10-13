@@ -27,10 +27,7 @@ import org.apache.commons.lang3.Validate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.github.dsheirer.preference.UserPreferences;
-import io.github.dsheirer.source.tuner.configuration.TunerConfigurationManager;
-import io.github.dsheirer.source.tuner.manager.DiscoveredNetworkTuner;
-import io.github.dsheirer.source.tuner.ui.DiscoveredTunerModel;
+import io.github.dsheirer.source.tuner.manager.TunerManager;
 
 import javax.swing.JButton;
 import javax.swing.JComboBox;
@@ -42,29 +39,22 @@ import javax.swing.JTextField;
 
 public class AddNetworkTunerDialog extends JFrame {
   private final static Logger mLog = LoggerFactory.getLogger(AddNetworkTunerDialog.class);
-  private UserPreferences mUserPreferences;
-  private DiscoveredTunerModel mDiscoveredTunerModel;
-  private TunerConfigurationManager mTunerConfigurationManager;
+  private TunerManager mTunerManager;
   private JLabel mTypeLabel;
   private JLabel mHostLabel;
   private JLabel mPortLabel;
   private JLabel mFrequencyLabel;
-  private JComboBox mTypeComboBox;
+  private JComboBox<String> mTypeComboBox;
   private JTextField mHostField;
   private JTextField mPortField;
   private JTextField mFrequencyField;
   private JButton mAddButton;
   private JButton mCancelButton;
 
-  public AddNetworkTunerDialog(UserPreferences userPreferences, DiscoveredTunerModel discoveredTunerModel,
-      TunerConfigurationManager tunerConfigurationManager) {
-    Validate.notNull(userPreferences, "UserPreferences cannot be null");
-    Validate.notNull(discoveredTunerModel, "TunerModel cannot be null");
-    Validate.notNull(tunerConfigurationManager, "TunerConfigurationManager cannot be null");
+  public AddNetworkTunerDialog(TunerManager tunerManager) {
+    Validate.notNull(tunerManager, "TunerManager cannot be null");
 
-    mDiscoveredTunerModel = discoveredTunerModel;
-    mUserPreferences = userPreferences;
-    mTunerConfigurationManager = tunerConfigurationManager;
+    mTunerManager = tunerManager;
 
     setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
     setTitle("Add Network Tuner");
@@ -83,21 +73,21 @@ public class AddNetworkTunerDialog extends JFrame {
     mHostLabel = new JLabel("Host:");
     content.add(mHostLabel);
 
-    mHostField = new JTextField("");
+    mHostField = new JTextField("localhost");
     mHostField.setToolTipText("Enter the hostname or IP address of the network tuner");
     content.add(mHostField, "span2,grow,wrap");
 
     mPortLabel = new JLabel("Port:");
     content.add(mPortLabel);
 
-    mPortField = new JTextField("");
-    mHostField.setToolTipText("Enter the port number of the network tuner");
+    mPortField = new JTextField("1234");
+    mPortField.setToolTipText("Enter the port number of the network tuner (1-65535)");
     content.add(mPortField, "span2,grow,wrap");
 
     mFrequencyLabel = new JLabel("Frequency (Hz):");
     content.add(mFrequencyLabel);
 
-    mFrequencyField = new JTextField("");
+    mFrequencyField = new JTextField("100000000");
     mFrequencyField.setToolTipText("Enter the center frequency of the network tuner in Hertz (Hz)");
     content.add(mFrequencyField, "span2,grow,wrap");
 
@@ -109,30 +99,52 @@ public class AddNetworkTunerDialog extends JFrame {
     mAddButton.addActionListener(e -> {
 
       long frequency = getFrequency();
+      String host = getHost();
+      int port = getPort();
 
-      if (frequency <= 0 || frequency > Integer.MAX_VALUE) {
+      if (frequency < 1_000_000L || frequency > 3_000_000_000L) {
         JOptionPane.showMessageDialog(AddNetworkTunerDialog.this,
-            "Please provide a center frequency (1Hz to 2.14 GHz)",
+            "Please provide a center frequency from 1 MHz to 3 GHz.",
             "Center Frequency Required",
             JOptionPane.ERROR_MESSAGE);
         return;
       }
 
-      mLog.info("Adding network tuner = frequency [" + frequency + "] host [" + getHost() + ":" + getPort() + "]");
+      if (host.isBlank()) {
+        JOptionPane.showMessageDialog(AddNetworkTunerDialog.this, "Please provide a host name or IP address.",
+            "Host Required", JOptionPane.ERROR_MESSAGE);
+        return;
+      }
+
+      if (port < 1 || port > 65535) {
+        JOptionPane.showMessageDialog(AddNetworkTunerDialog.this, "Please provide a port from 1 to 65535.",
+            "Valid Port Required", JOptionPane.ERROR_MESSAGE);
+        return;
+      }
+
+      String id = "RTL TCP " + host + ":" + port;
+      if (mTunerManager.getDiscoveredTunerModel().getDiscoveredTuner(id) != null) {
+        JOptionPane.showMessageDialog(AddNetworkTunerDialog.this, "That network tuner already exists.",
+            "Duplicate Network Tuner", JOptionPane.ERROR_MESSAGE);
+        return;
+      }
+
+      mLog.info("Adding network tuner = frequency [" + frequency + "] host [" + host + ":" + port + "]");
 
       try {
         NetworkTunerConfiguration config = NetworkTunerConfiguration.create();
         config.setFrequency(frequency);
-        config.setHost(getHost());
-        config.setPort(getPort());
-        mTunerConfigurationManager.addTunerConfiguration(config);
-        DiscoveredNetworkTuner discoveredNetworkTuner = new DiscoveredNetworkTuner(mUserPreferences, config);
-        mDiscoveredTunerModel.addDiscoveredTuner(discoveredNetworkTuner);
+        config.setHost(host);
+        config.setPort(port);
+        mTunerManager.addNetworkTuner(config);
       } catch (Exception ex) {
         mLog.error("Error adding network tuner", ex);
+        JOptionPane.showMessageDialog(AddNetworkTunerDialog.this, ex.getMessage(),
+            "Unable to Add Network Tuner", JOptionPane.ERROR_MESSAGE);
+        return;
       }
 
-      AddNetworkTunerDialog.this.setVisible(false);
+      AddNetworkTunerDialog.this.dispose();
     });
     content.add(mAddButton, "grow,push");
 
@@ -140,7 +152,7 @@ public class AddNetworkTunerDialog extends JFrame {
     mCancelButton.addActionListener(new ActionListener() {
       @Override
       public void actionPerformed(ActionEvent e) {
-        AddNetworkTunerDialog.this.setVisible(false);
+        AddNetworkTunerDialog.this.dispose();
       }
     });
     content.add(mCancelButton, "grow,push");
@@ -163,15 +175,15 @@ public class AddNetworkTunerDialog extends JFrame {
   }
 
   private String getHost() {
-    return mHostField.getText();
+    return mHostField.getText() == null ? "" : mHostField.getText().trim();
   }
 
-  private short getPort() {
+  private int getPort() {
     String text = mPortField.getText();
 
     if (text != null && !text.isEmpty()) {
       try {
-        return Short.parseShort(text);
+        return Integer.parseInt(text);
       } catch (Exception e) {
         // Do nothing, we couldn't parse the port value
       }

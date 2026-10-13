@@ -34,9 +34,6 @@ public class DiscoveredNetworkTuner extends DiscoveredTuner {
   public DiscoveredNetworkTuner(UserPreferences userPreferences, NetworkTunerConfiguration networkTunerConfiguration) {
     mUserPreferences = userPreferences;
     setTunerConfiguration(networkTunerConfiguration);
-
-    // Default all network tuners to be disabled on startup
-    setEnabled(false);
   }
 
   public NetworkTunerConfiguration getNetworkTunerConfiguration() {

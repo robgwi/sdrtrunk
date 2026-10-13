@@ -1,7 +1,7 @@
 # Linux x86_64 installation
 
 This distribution supports 64-bit Intel and AMD Linux desktops, mini PCs, and headless servers. It includes its own
-Java 26 and JavaFX runtime, so a separate Java installation is not required.
+Java 27 and JavaFX runtime, so a separate Java installation is not required.
 
 ## Requirements
 
@@ -14,8 +14,8 @@ Java 26 and JavaFX runtime, so a separate Java installation is not required.
 ```bash
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
-unzip sdr-trunk-linux-x86_64-v0.7.0-beta-22.zip
-cd sdr-trunk-linux-x86_64-v0.7.0-beta-22
+unzip sdr-trunk-linux-x86_64-v0.7.0-beta-23.zip
+cd sdr-trunk-linux-x86_64-v0.7.0-beta-23
 bin/sdr-trunk
 ```
 
