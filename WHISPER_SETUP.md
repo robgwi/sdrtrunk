@@ -71,6 +71,10 @@ If this command fails, correct the Python installation before configuring sdrtru
    realpath "$HOME/whisper-env/bin/whisper"
    ```
 
+   Copy only the output of that command into sdrtrunk, for example
+   `/home/username/whisper-env/bin/whisper`. Do not copy the word `realpath`, quotation marks, `$HOME`, or the
+   terminal command itself into the setting.
+
 4. Start with these settings:
 
    | Setting | Recommended Raspberry Pi value |
@@ -133,6 +137,15 @@ Background transcription runs even when no browser is open and does not require 
 ### The dashboard says Whisper is disabled
 
 Open **Settings**, enable **Background transcription**, and save.
+
+If Whisper is not installed on this machine, leave **Background transcription** disabled. Whisper is optional and
+sdrtrunk will continue decoding, recording, streaming, and serving the web console without it.
+
+### The dashboard says Whisper is unavailable
+
+The executable field does not point to a runnable Whisper installation. Enter either `whisper` when it is available
+on the sdrtrunk process's `PATH`, or an absolute path such as `/home/username/whisper-env/bin/whisper`. Beginning with
+beta 25, unavailable configurations are shown in Settings and are skipped without producing an error for every call.
 
 ### A call plays but no transcript appears
 

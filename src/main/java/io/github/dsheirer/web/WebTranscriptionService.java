@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -13,6 +14,7 @@ import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.prefs.Preferences;
 import java.util.regex.Pattern;
 import java.util.regex.Matcher;
@@ -47,12 +49,23 @@ public class WebTranscriptionService
     private final ConcurrentLinkedDeque<Map<String,Object>> mTranscripts = new ConcurrentLinkedDeque<>();
     private final Semaphore mWorker = new Semaphore(1);
     private final java.util.concurrent.ExecutorService mExecutor = Executors.newSingleThreadExecutor(Thread.ofVirtual().factory());
+    private final AtomicReference<String> mLastError = new AtomicReference<>("");
+    private final AtomicReference<String> mLastLoggedProblem = new AtomicReference<>("");
 
     public Map<String,Object> settings()
     {
+        boolean enabled = mPreferences.getBoolean("sdrtrunk.whisper.enabled", false);
+        ExecutableStatus executableStatus = inspectExecutable(
+            mPreferences.get("sdrtrunk.whisper.executable", "whisper"));
         Map<String,Object> value = new LinkedHashMap<>();
-        value.put("enabled", mPreferences.getBoolean("sdrtrunk.whisper.enabled", false));
+        value.put("enabled", enabled);
         value.put("executable", mPreferences.get("sdrtrunk.whisper.executable", "whisper"));
+        value.put("available", executableStatus.available());
+        value.put("resolvedExecutable", executableStatus.resolvedExecutable());
+        value.put("configurationError", executableStatus.available() ? "" : executableStatus.message());
+        value.put("lastError", mLastError.get());
+        value.put("status", !enabled ? "Disabled" : executableStatus.available() ?
+            (mWorker.availablePermits() == 0 ? "Processing" : "Ready") : "Unavailable");
         value.put("model", mPreferences.get("sdrtrunk.whisper.model", "base.en"));
         value.put("language", mPreferences.get("sdrtrunk.whisper.language", "English"));
         value.put("task", mPreferences.get("sdrtrunk.whisper.task", "transcribe"));
@@ -79,6 +92,8 @@ public class WebTranscriptionService
         putString(values, "city", "sdrtrunk.whisper.city");
         Object timeout = values.get("timeoutSeconds");
         if(timeout instanceof Number number) { mPreferences.putInt("sdrtrunk.whisper.timeout", Math.max(10, number.intValue())); }
+        mLastError.set("");
+        mLastLoggedProblem.set("");
     }
 
     private void putBoolean(Map<String,Object> values, String source, String key)
@@ -91,10 +106,17 @@ public class WebTranscriptionService
     public void submit(byte[] mp3, Map<String,Object> call)
     {
         if(!mPreferences.getBoolean("sdrtrunk.whisper.enabled", false)) { return; }
-        mExecutor.execute(() -> process(mp3, call));
+        ExecutableStatus executableStatus = inspectExecutable(
+            mPreferences.get("sdrtrunk.whisper.executable", "whisper"));
+        if(!executableStatus.available())
+        {
+            reportProblem(executableStatus.message(), null);
+            return;
+        }
+        mExecutor.execute(() -> process(mp3, call, executableStatus.resolvedExecutable()));
     }
 
-    private void process(byte[] mp3, Map<String,Object> call)
+    private void process(byte[] mp3, Map<String,Object> call, String executable)
     {
         Path directory = null;
         mWorker.acquireUninterruptibly();
@@ -103,7 +125,6 @@ public class WebTranscriptionService
             directory = Files.createTempDirectory("sdrtrunk-whisper-");
             Path audio = directory.resolve("call.mp3");
             Files.write(audio, mp3);
-            String executable = mPreferences.get("sdrtrunk.whisper.executable", "whisper");
             String model = mPreferences.get("sdrtrunk.whisper.model", "base.en");
             List<String> command = new ArrayList<>(List.of(executable, audio.toString(), "--model", model,
                 "--output_format", "txt", "--output_dir", directory.toString(), "--language",
@@ -128,8 +149,10 @@ public class WebTranscriptionService
             item.put("model", model);
             mTranscripts.addFirst(item);
             while(mTranscripts.size() > 200) { mTranscripts.pollLast(); }
+            mLastError.set("");
+            mLastLoggedProblem.set("");
         }
-        catch(Exception e) { mLog.error("Background Whisper transcription failed", e); }
+        catch(Exception e) { reportProblem(rootMessage(e), e); }
         finally
         {
             if(directory != null)
@@ -141,6 +164,104 @@ public class WebTranscriptionService
             mWorker.release();
         }
     }
+
+    private void reportProblem(String message, Exception exception)
+    {
+        String detail = message == null || message.isBlank() ? "Unknown Whisper error" : message;
+        mLastError.set(detail);
+        if(!detail.equals(mLastLoggedProblem.getAndSet(detail)))
+        {
+            if(exception == null)
+            {
+                mLog.warn("Background Whisper transcription is enabled but unavailable: {}", detail);
+            }
+            else
+            {
+                mLog.error("Background Whisper transcription failed: {}", detail, exception);
+            }
+        }
+    }
+
+    private static String rootMessage(Throwable throwable)
+    {
+        Throwable current = throwable;
+        while(current.getCause() != null) { current = current.getCause(); }
+        return current.getMessage() != null ? current.getMessage() : current.getClass().getSimpleName();
+    }
+
+    static ExecutableStatus inspectExecutable(String configuredExecutable)
+    {
+        String configured = configuredExecutable != null ? configuredExecutable.trim() : "";
+        if(configured.isEmpty())
+        {
+            return new ExecutableStatus(false, "", "Whisper executable is not configured");
+        }
+        if(configured.startsWith("realpath ") || configured.startsWith("which ") || configured.contains("$(") ||
+            configured.contains("&&") || configured.contains(";") || configured.contains("\n") ||
+            configured.contains("\r"))
+        {
+            return new ExecutableStatus(false, "", "Enter only the Whisper executable path, not a shell command");
+        }
+
+        if((configured.startsWith("\"") && configured.endsWith("\"")) ||
+            (configured.startsWith("'") && configured.endsWith("'")))
+        {
+            configured = configured.substring(1, configured.length() - 1);
+        }
+        String home = System.getProperty("user.home", "");
+        if(configured.equals("~")) { configured = home; }
+        else if(configured.startsWith("~/")) { configured = home + configured.substring(1); }
+        configured = configured.replace("${HOME}", home).replace("$HOME", home);
+
+        if(configured.contains("/") || configured.contains("\\"))
+        {
+            try
+            {
+                Path path = Path.of(configured).toAbsolutePath().normalize();
+                if(!Files.isRegularFile(path))
+                {
+                    return new ExecutableStatus(false, path.toString(),
+                        "Whisper executable was not found: " + path);
+                }
+                if(!Files.isExecutable(path))
+                {
+                    return new ExecutableStatus(false, path.toString(),
+                        "Whisper executable is not executable: " + path);
+                }
+                return new ExecutableStatus(true, path.toString(), "Ready");
+            }
+            catch(Exception e)
+            {
+                return new ExecutableStatus(false, "", "Invalid Whisper executable path: " + configured);
+            }
+        }
+
+        String pathValue = System.getenv("PATH");
+        if(pathValue != null)
+        {
+            List<String> extensions = System.getProperty("os.name", "").toLowerCase().contains("win") ?
+                Arrays.asList("", ".exe", ".cmd", ".bat") : List.of("");
+            for(String directory: pathValue.split(Pattern.quote(System.getProperty("path.separator"))))
+            {
+                for(String extension: extensions)
+                {
+                    try
+                    {
+                        Path candidate = Path.of(directory, configured + extension).toAbsolutePath().normalize();
+                        if(Files.isRegularFile(candidate) && Files.isExecutable(candidate))
+                        {
+                            return new ExecutableStatus(true, candidate.toString(), "Ready");
+                        }
+                    }
+                    catch(Exception ignored) {}
+                }
+            }
+        }
+        return new ExecutableStatus(false, configured,
+            "Whisper executable '" + configured + "' was not found on PATH");
+    }
+
+    record ExecutableStatus(boolean available, String resolvedExecutable, String message) {}
 
     static String normalize(String text)
     {

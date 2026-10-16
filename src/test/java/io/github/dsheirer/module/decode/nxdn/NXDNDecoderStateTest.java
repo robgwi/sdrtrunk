@@ -45,9 +45,10 @@ class NXDNDecoderStateTest
     void inboundIndividualCallPublishesRadioIdentifiersAndEndsCleanly()
     {
         Channel channel = new Channel("NXDN Simplex");
-        channel.setDecodeConfiguration(new DecodeConfigNXDN());
-        NXDNTrafficChannelManager trafficChannelManager = new NXDNTrafficChannelManager(channel);
-        NXDNDecoderState decoderState = new NXDNDecoderState(channel, trafficChannelManager);
+        DecodeConfigNXDN configuration = new DecodeConfigNXDN();
+        configuration.setChannelMode(NXDNChannelMode.CONVENTIONAL);
+        channel.setDecodeConfiguration(configuration);
+        NXDNDecoderState decoderState = new NXDNDecoderState(channel, null);
 
         CorrectedBinaryMessage callMessage = new CorrectedBinaryMessage(80);
         callMessage.setInt(CallType.INDIVIDUAL.getValue(), CALL_TYPE);

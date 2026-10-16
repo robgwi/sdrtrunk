@@ -4,12 +4,13 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current release: 0.7.0-beta-24
+## Current development version: 0.7.1-beta1 (not yet published)
 
-- [Download Raspberry Pi ARM64 or Linux x86_64 0.7 beta 24](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-24)
+- [Latest downloadable release: Raspberry Pi ARM64 or Linux x86_64 0.7 beta 24](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-24)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Linux x86_64 installation guide](LINUX_X86_64.md)
 - [Local Whisper setup guide](WHISPER_SETUP.md)
+- [VCE web interface integration and feature status](VCE_WEB_INTERFACE.md)
 - [Remote Call API and heartbeat guide](REMOTE_API.md)
 - [Rdio Scanner heartbeat integration guide](RDIO_SCANNER_HEARTBEAT.md)
 - [Official project update and integration guide](UPSTREAM_SYNC.md)
@@ -23,7 +24,8 @@ The Raspberry Pi archive contains its own ARM64 Java and JavaFX runtime. A separ
 ### Scanner-style web console
 
 - Runs alongside both the desktop and headless application.
-- Keeps the main page focused on the live police-scanner display; management tools open from the top menu in modal windows.
+- Uses the responsive interface from [tylerwatt12/sdrtrunk-vce](https://github.com/tylerwatt12/sdrtrunk-vce), adapted to this fork's embedded Java server and existing playlist model.
+- Keeps the main page focused on the live police-scanner display; management tools use the VCE top navigation and responsive workspaces.
 - Shows scanning/receiving state, talkgroup ID and configured alias/name, source radio, protocol, frequency, and recent decoded activity.
 - Clears the previous talkgroup, alias, frequency, source, signal, and level as soon as the receiver returns to scanning.
 - Starts and stops configured channels remotely.
@@ -34,6 +36,13 @@ The Raspberry Pi archive contains its own ARM64 Java and JavaFX runtime. A separ
 - Provides a selectable live tuner spectrum and waterfall without interrupting active channel decoders.
 - Uses a password login and private browser session cookie; API clients can continue using `Authorization: Bearer <web-password>`.
 - Enables, disables, and restarts configured streaming destinations from the Streaming window.
+
+Version 0.7.1 Beta 1 replaces the previous inline browser dashboard instead of keeping a theme selector. Supported VCE pages are
+backed by this fork's live APIs for the scanner dashboard, browser call queue, transcripts, channels and talkgroups,
+RadioReference import, streaming and Remote Calls, tuners, spectrum/waterfall, recordings, Whisper, host metrics, and
+web-password administration. VCE features that require its separate SQLite history/account subsystem—multi-user
+roles, scan lists, historical analytics, managed recording catalog, and P25 network visualization—remain hidden until
+equivalent backend support is implemented. See [VCE_WEB_INTERFACE.md](VCE_WEB_INTERFACE.md) for the endpoint map.
 
 Signal strength is displayed as unavailable when a tuner does not expose calibrated RSSI through sdrtrunk's shared tuner interface. The dashboard does not fabricate a signal value.
 
@@ -62,6 +71,8 @@ Other advanced protocol-specific decoder fields, site/channel creation, conventi
 - Choose a protocol while cloning a channel.
 - Preserve general channel settings while resetting incompatible protocol-specific decoder options.
 - Enable **Record Unknown Simplex Radio IDs** on an NXDN channel to record inbound direct calls when either radio ID has no alias.
+- Select an explicit **Conventional** or **Trunked** NXDN channel type in both the desktop and web channel editors;
+  existing playlists without the field remain trunked for compatibility.
 - Use **NBFM Squelch: Carrier / CTCSS / DCS** to select carrier squelch, a fixed CTCSS tone, a fixed DCS code, or CTCSS tone search.
 - Add CTCSS tones as first-class alias identifiers from the NBFM alias menu; tones survive playlist saves and alias cloning and resolve against decoded CTCSS identifiers.
 - Use **DCS Monitor / Code Search** from Additional Decoders when searching for an unknown DCS code.
@@ -113,8 +124,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-linux-aarch64-v0.7.0-beta-24.zip
-cd sdr-trunk-linux-aarch64-v0.7.0-beta-24
+unzip sdr-trunk-linux-aarch64-v0.7.1-beta1.zip
+cd sdr-trunk-linux-aarch64-v0.7.1-beta1
 bin/sdr-trunk
 ```
 
@@ -132,6 +143,55 @@ bin/sdr-trunk
 Environment variables override saved GUI password settings. The older `SDRTRUNK_WEB_TOKEN` name remains a compatibility fallback. Do not commit real passwords, keys, or tokens to this repository.
 
 ## Release history
+
+### 0.7.1-beta1 (in development)
+
+- Added explicit Conventional/Trunked NXDN channel modes, conventional call start/progress/release/disconnect handling,
+  conventional multi-frequency rotation behavior, clone persistence, RadioReference trunked defaults, and matching web
+  channel controls, adapted from `tylerwatt12/sdrtrunk-vce`.
+- Accepted NXDN null-group ID 0 for conventional/private-call routing and allowed an encrypted channel state to recover
+  directly to clear call, active, or data states.
+- Fixed a synchronous NXDN traffic-channel start/rejection allocation race, increased the NXDN traffic fade timeout to
+  eight seconds, and bounded pre-header audio caching so a missing call header cannot grow memory indefinitely.
+- Added NXDN source-heartbeat health monitoring with last-valid-message/audio diagnostics and controlled standard-channel
+  restart attempts using bounded exponential backoff. Legitimately idle scanning does not trigger recovery.
+- Added regression coverage for legacy NXDN configuration compatibility, conventional call cleanup, channel cloning and
+  rotation states, null-group validity, encrypted-state recovery, and the bounded audio cache.
+- Replaced the fork's original inline web dashboard with the responsive VCE web interface from
+  [tylerwatt12/sdrtrunk-vce](https://github.com/tylerwatt12/sdrtrunk-vce), retaining its GPL notice and author credit.
+- Added VCE-compatible authentication, administrator session, saved browser preferences, static-resource delivery,
+  revision reload detection, password change, and web-server restart contracts to the embedded Java server.
+- Added VCE-styled adapters for the existing live scanner, sequential call playback, transcripts, channel/talkgroup
+  editing, NBFM/CTCSS/DCS controls, NXDN unknown-simplex recording, RadioReference import, streaming health,
+  Remote Calls and heartbeats, tuner management, spectrum/waterfall, recordings, Whisper, and host metrics.
+- Removed the old embedded dashboard document and made the VCE interface the only browser console.
+- Kept VCE database-only features hidden rather than exposing controls without working backend support; documented the
+  current feature and endpoint coverage in `VCE_WEB_INTERFACE.md`.
+- Made local Whisper remain quiet and inactive when it is disabled or its executable is unavailable.
+- Added preflight validation for absolute paths, home-directory paths, and executable names found on `PATH` before a
+  recorded call is submitted for transcription.
+- Replaced repeated missing-executable stack traces with one concise warning per distinct configuration or runtime
+  problem.
+- Added live Whisper availability, resolved-path, configuration-error, and last-runtime-error status to the web
+  console dashboard and Settings window.
+- Clarified that the Whisper executable field accepts only a command name or executable path, not a terminal command.
+- Completed the VCE Streaming workspace with create/edit/delete support for Rdio Scanner, Broadcastify Calls,
+  OpenMHz, Broadcastify Feed, Icecast, and Shoutcast destinations, including URLs, credentials, system IDs,
+  heartbeat/test options, queue limits, audio metadata, connection health, reconnect, and clone controls.
+- Expanded web talkgroup routing so aliases can target native streaming destinations as well as Remote Call APIs;
+  destination renames preserve alias routing and destination deletion removes stale assignments.
+- Added per-channel call-event and decoded-message logging controls to the web Playlist editor.
+- Added authenticated Application Log and Event Log viewers, including severity/search controls, recent-log tailing,
+  event-log selection, and complete event-log downloads.
+- Expanded the VCE Tuners workspace with complete rtl_tcp creation and editing for host, port, center frequency,
+  sample rate, automatic/manual gain, Bias-T, and persistent auto-reconnect settings.
+- Added web editing for attached RTL2832/RTL-SDR center frequency, sample rate, PPM correction, Bias-T, and R8x master
+  gain, while matching the desktop GUI's frequency/sample-rate lock whenever decoder channels are assigned.
+- Added tuner allocation, usable-bandwidth, configuration-lock, active-channel, network-health, and diagnostic logging
+  details to the web console, with safeguards that prevent disruptive retuning while decoder channels are active.
+- Upgraded the browser spectrum and waterfall with selectable FFT size/window, zoom, pan, dB range, smoothing,
+  waterfall palettes, update-rate controls, frequency and dB axes, active-channel bandwidth overlays, cursor readout,
+  and confirmed click-to-tune for idle tuners.
 
 ### 0.7.0-beta-24
 

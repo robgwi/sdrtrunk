@@ -85,6 +85,7 @@ import io.github.dsheirer.module.decode.nbfm.DecodeConfigNBFM;
 import io.github.dsheirer.module.decode.nbfm.NBFMDecoder;
 import io.github.dsheirer.module.decode.nbfm.NBFMDecoderState;
 import io.github.dsheirer.module.decode.nxdn.DecodeConfigNXDN;
+import io.github.dsheirer.module.decode.nxdn.NXDNChannelHealthMonitor;
 import io.github.dsheirer.module.decode.nxdn.NXDNDecoder;
 import io.github.dsheirer.module.decode.nxdn.NXDNDecoderState;
 import io.github.dsheirer.module.decode.nxdn.NXDNTrafficChannelManager;
@@ -528,12 +529,12 @@ public class DecoderFactory
             if(channel.getSourceConfiguration() instanceof SourceConfigTunerMultipleFrequency sctmf &&
                     sctmf.hasMultipleFrequencies())
             {
-                List<State> activeStates = new ArrayList<>();
-                activeStates.add(State.CONTROL);
-                modules.add(new ChannelRotationMonitor(activeStates, sctmf.getFrequencyRotationDelay(), userPreferences));
+                modules.add(new ChannelRotationMonitor(nxdnRotationActiveStates(configNXDN),
+                    sctmf.getFrequencyRotationDelay(), userPreferences));
             }
 
             modules.add(new NXDNDecoder(configNXDN));
+            modules.add(new NXDNChannelHealthMonitor(channel));
             NXDNAudioModule audioModule = new NXDNAudioModule(userPreferences, aliasList,
                     configNXDN.isRecordUnknownSimplexCalls());
             configureJMBEAudioModule(audioModule, configNXDN);
@@ -541,9 +542,16 @@ public class DecoderFactory
 
             if(channel.getChannelType() == ChannelType.STANDARD)
             {
-                NXDNTrafficChannelManager primaryTCM = new NXDNTrafficChannelManager(channel);
-                modules.add(primaryTCM);
-                modules.add(new NXDNDecoderState(channel, primaryTCM));
+                if(configNXDN.isTrunked())
+                {
+                    NXDNTrafficChannelManager primaryTCM = new NXDNTrafficChannelManager(channel);
+                    modules.add(primaryTCM);
+                    modules.add(new NXDNDecoderState(channel, primaryTCM));
+                }
+                else
+                {
+                    modules.add(new NXDNDecoderState(channel, null));
+                }
             }
             else if(trafficChannelManager instanceof NXDNTrafficChannelManager parentTCM)
             {
@@ -561,6 +569,12 @@ public class DecoderFactory
         {
             throw new IllegalArgumentException("Can't create NXDN decoder - unrecognized config: " + decodeConfig);
         }
+    }
+
+    static List<State> nxdnRotationActiveStates(DecodeConfigNXDN decodeConfig)
+    {
+        return decodeConfig != null && decodeConfig.isConventional() ?
+            List.of(State.CALL, State.ENCRYPTED, State.DATA) : List.of(State.CONTROL);
     }
 
     /**
@@ -915,6 +929,7 @@ public class DecoderFactory
                 case NXDN:
                     DecodeConfigNXDN origNXDN = (DecodeConfigNXDN)config;
                     DecodeConfigNXDN copyNXDN = new DecodeConfigNXDN();
+                    copyNXDN.setChannelMode(origNXDN.getChannelMode());
                     copyNXDN.setChannelMap(origNXDN.getChannelMap());
                     copyNXDN.setTransmissionMode(origNXDN.getTransmissionMode());
                     copyNXDN.setTrafficChannelPoolSize(origNXDN.getTrafficChannelPoolSize());

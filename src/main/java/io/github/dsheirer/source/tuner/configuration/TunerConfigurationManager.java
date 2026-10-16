@@ -23,6 +23,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import io.github.dsheirer.preference.UserPreferences;
+import io.github.dsheirer.source.tuner.TunerClass;
 import io.github.dsheirer.source.tuner.TunerFactory;
 import io.github.dsheirer.source.tuner.TunerType;
 import io.github.dsheirer.source.tuner.manager.DiscoveredTuner;
@@ -241,6 +242,30 @@ public class TunerConfigurationManager implements IDiscoveredTunerStatusListener
         try
         {
             mDisabledTunerList.removeIf(tuner -> tuner.matches(discoveredTuner));
+        }
+        finally
+        {
+            mLock.unlock();
+        }
+
+        saveConfigurations();
+    }
+
+    /**
+     * Replaces the persisted identity for a disabled tuner whose editable address or path changed.
+     */
+    public void updateDisabledTunerIdentity(TunerClass tunerClass, String oldId, String newId)
+    {
+        mLock.lock();
+
+        try
+        {
+            boolean disabled = mDisabledTunerList.removeIf(tuner -> tuner.tunerClass() == tunerClass &&
+                tuner.id().equals(oldId));
+            if(disabled)
+            {
+                mDisabledTunerList.add(new DisabledTuner(tunerClass, newId));
+            }
         }
         finally
         {

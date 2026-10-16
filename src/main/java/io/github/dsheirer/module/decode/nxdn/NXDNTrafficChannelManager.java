@@ -583,8 +583,10 @@ public class NXDNTrafficChannelManager extends TrafficChannelManager implements 
             ChannelStartProcessingRequest startChannelRequest = new ChannelStartProcessingRequest(trafficChannel,
                     nxdnChannel, ic, this);
             startChannelRequest.addPreloadDataContent(new NXDNChannelInfoPreloadData(mChannelAccessInformation, mChannelFrequencies));
-            getInterModuleEventBus().post(startChannelRequest);
+            //The event bus is synchronous. Mark this allocated before posting so an immediate start rejection cannot
+            //be overwritten after the rejection handler returns the channel to the available pool.
             tracker.setTrafficChannelAllocated(true);
+            getInterModuleEventBus().post(startChannelRequest);
         }
         else
         {

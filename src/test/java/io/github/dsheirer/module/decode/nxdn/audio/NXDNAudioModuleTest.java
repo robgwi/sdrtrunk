@@ -12,6 +12,7 @@
 package io.github.dsheirer.module.decode.nxdn.audio;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.dsheirer.alias.Alias;
@@ -31,6 +32,12 @@ class NXDNAudioModuleTest
     private static final IntField CALL_TYPE = IntField.length3(16);
     private static final IntField SOURCE_RADIO = IntField.length16(24);
     private static final IntField DESTINATION_RADIO = IntField.length16(40);
+
+    @Test
+    void boundsPreHeaderAudioCache()
+    {
+        assertEquals(12, NXDNAudioModule.MAX_CACHED_AUDIO_MESSAGES);
+    }
 
     @Test
     void identifiesInboundSimplexCallWhenEitherRadioIsUnknown()

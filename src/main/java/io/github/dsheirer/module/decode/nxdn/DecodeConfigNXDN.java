@@ -43,6 +43,7 @@ public class DecodeConfigNXDN extends DecodeConfigJMBE
     private boolean mIgnoreDataCalls = false;
     private boolean mIgnoreEncryptedCalls = false;
     private boolean mRecordUnknownSimplexCalls = false;
+    private NXDNChannelMode mChannelMode;
 
     private static final ChannelSpecification CHANNEL_4800 = new ChannelSpecification(12000.0, 6250, 3000.0, 3125.0);
     private static final ChannelSpecification CHANNEL_9600 = new ChannelSpecification(24000.0, 12500, 5200.0, 6250.0);
@@ -73,6 +74,33 @@ public class DecodeConfigNXDN extends DecodeConfigJMBE
     public DecodeConfigNXDN(TransmissionMode transmissionMode)
     {
         mTransmissionMode = transmissionMode;
+    }
+
+    /**
+     * Configured NXDN channel mode. Legacy configurations that do not contain this setting remain trunked, matching
+     * the behavior before an explicit mode was available.
+     */
+    @JacksonXmlProperty(isAttribute = true, localName = "channel_mode")
+    public NXDNChannelMode getChannelMode()
+    {
+        return mChannelMode != null ? mChannelMode : NXDNChannelMode.TRUNKED;
+    }
+
+    public void setChannelMode(NXDNChannelMode channelMode)
+    {
+        mChannelMode = channelMode;
+    }
+
+    @JsonIgnore
+    public boolean isConventional()
+    {
+        return getChannelMode() == NXDNChannelMode.CONVENTIONAL;
+    }
+
+    @JsonIgnore
+    public boolean isTrunked()
+    {
+        return getChannelMode() == NXDNChannelMode.TRUNKED;
     }
 
     /**

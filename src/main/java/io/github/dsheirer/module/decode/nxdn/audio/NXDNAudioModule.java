@@ -43,6 +43,7 @@ import java.util.List;
  */
 public class NXDNAudioModule extends AmbeAudioModule
 {
+    static final int MAX_CACHED_AUDIO_MESSAGES = 12;
     private final SquelchStateListener mSquelchStateListener = new SquelchStateListener();
     private final NonClippingGain mGain = new NonClippingGain(5.0f, 0.95f);
     private final List<Audio> mCachedAudioMessages = new ArrayList<>();
@@ -86,6 +87,10 @@ public class NXDNAudioModule extends AmbeAudioModule
     {
         setRecordAudio(false);
         getIdentifierCollection().clear();
+        mEncryptedCallStateEstablished = false;
+        mEncryptedCall = false;
+        mAudioCodec = null;
+        mCachedAudioMessages.clear();
     }
 
     @Override
@@ -109,6 +114,11 @@ public class NXDNAudioModule extends AmbeAudioModule
                 else
                 {
                     //Cache audio until we can determine the encryption state
+                    if(mCachedAudioMessages.size() >= MAX_CACHED_AUDIO_MESSAGES)
+                    {
+                        mCachedAudioMessages.removeFirst();
+                    }
+
                     mCachedAudioMessages.add(audio);
                 }
             }

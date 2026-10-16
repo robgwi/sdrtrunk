@@ -18,6 +18,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.dsheirer.module.decode.nbfm.DecodeConfigNBFM;
 import io.github.dsheirer.module.decode.nbfm.DeemphasisMode;
+import io.github.dsheirer.module.decode.nxdn.DecodeConfigNXDN;
+import io.github.dsheirer.module.decode.nxdn.NXDNChannelMode;
+import io.github.dsheirer.channel.state.State;
 import io.github.dsheirer.module.decode.squelch.SquelchDecoderConfig;
 import io.github.dsheirer.module.decode.squelch.ctcss.CTCSSCode;
 import java.util.ArrayList;
@@ -54,5 +57,19 @@ class DecoderFactoryTest
 
         copy.getSquelchDecoders().getFirst().setValue(CTCSSCode.TONE_1035.name());
         assertEquals(CTCSSCode.TONE_1000.name(), original.getSquelchDecoders().getFirst().getValue());
+    }
+
+    @Test
+    void copiesNxdnModeAndUsesItForRotationStates()
+    {
+        DecodeConfigNXDN conventional = new DecodeConfigNXDN();
+        conventional.setChannelMode(NXDNChannelMode.CONVENTIONAL);
+
+        DecodeConfigNXDN copy = (DecodeConfigNXDN)DecoderFactory.copy(conventional);
+
+        assertEquals(NXDNChannelMode.CONVENTIONAL, copy.getChannelMode());
+        assertEquals(List.of(State.CALL, State.ENCRYPTED, State.DATA),
+            DecoderFactory.nxdnRotationActiveStates(copy));
+        assertEquals(List.of(State.CONTROL), DecoderFactory.nxdnRotationActiveStates(new DecodeConfigNXDN()));
     }
 }

@@ -2,7 +2,12 @@ package io.github.dsheirer.web;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class WebTranscriptionServiceTest
 {
@@ -23,5 +28,29 @@ class WebTranscriptionServiceTest
         assertFalse(redacted.contains("555"));
         assertFalse(redacted.contains("6789"));
         assertFalse(redacted.contains("Main Street"));
+    }
+
+    @Test
+    void rejectsShellCommandInsteadOfLoggingAnErrorForEveryCall()
+    {
+        WebTranscriptionService.ExecutableStatus status = WebTranscriptionService.inspectExecutable(
+            "realpath \"$HOME/whisper-env/bin/whisper\"whisper");
+
+        assertFalse(status.available());
+        assertEquals("Enter only the Whisper executable path, not a shell command", status.message());
+    }
+
+    @Test
+    void acceptsAnExecutableWithAFullPath(@TempDir Path temporaryDirectory) throws Exception
+    {
+        Path executable = Files.writeString(temporaryDirectory.resolve("whisper-test"), "test");
+        executable.toFile().setExecutable(true);
+        assumeTrue(Files.isExecutable(executable));
+
+        WebTranscriptionService.ExecutableStatus status =
+            WebTranscriptionService.inspectExecutable(executable.toString());
+
+        assertTrue(status.available());
+        assertEquals(executable.toAbsolutePath().normalize().toString(), status.resolvedExecutable());
     }
 }

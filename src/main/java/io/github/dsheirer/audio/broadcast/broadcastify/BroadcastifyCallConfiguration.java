@@ -164,7 +164,16 @@ public class BroadcastifyCallConfiguration extends BroadcastConfiguration
     public BroadcastConfiguration copyOf()
     {
         BroadcastifyCallConfiguration copy = new BroadcastifyCallConfiguration();
+        copy.setName(getName());
+        copy.setHost(getHost());
+        copy.setPort(getPort());
+        copy.setDelay(getDelay());
+        copy.setMaximumRecordingAge(getMaximumRecordingAge());
+        copy.setEnabled(isEnabled());
         copy.setSystemID(getSystemID());
+        copy.setApiKey(getApiKey());
+        copy.setTestEnabled(isTestEnabled());
+        copy.setTestInterval(getTestInterval());
         return copy;
     }
 }
