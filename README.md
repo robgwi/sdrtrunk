@@ -4,9 +4,9 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current development version: 0.7.1-beta4 (not yet published)
+## Current release: 0.7.1-beta4
 
-- [Latest downloadable release: Raspberry Pi ARM64 or Linux x86_64 0.7 beta 24](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-24)
+- [Latest downloadable release: Raspberry Pi ARM64 or Linux x86_64 0.7.1 beta 4](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.1-beta4)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
 - [Linux x86_64 installation guide](LINUX_X86_64.md)
 - [Local Whisper setup guide](WHISPER_SETUP.md)
@@ -144,7 +144,7 @@ Environment variables override saved GUI password settings. The older `SDRTRUNK_
 
 ## Release history
 
-### 0.7.1-beta4 (in development)
+### 0.7.1-beta4
 
 - Fixed [upstream issue #2496](https://github.com/DSheirer/sdrtrunk/issues/2496): aliases without an explicitly
   selected color now inherit the active theme's table text color in Now Playing and the Events Log. An explicitly
