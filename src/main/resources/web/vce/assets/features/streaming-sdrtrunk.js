@@ -189,10 +189,17 @@ export function createStreamingWorkspace(deps) {
       fields.append(created.host);
       controls[name] = created.input;
     });
+    const talkerAliasSource = selectField(node, 'Talker alias sent to Broadcastify', 'talkerAliasSource', [
+      ['OVER_THE_AIR', 'Over-the-air talker alias'], ['PLAYLIST', 'Stored playlist alias']
+    ], existing?.talkerAliasSource || 'OVER_THE_AIR');
+    talkerAliasSource.host.dataset.types = 'broadcastify-call';
+    fields.append(talkerAliasSource.host);
+    controls.talkerAliasSource = talkerAliasSource.input;
     const toggles = node('div', 'ui-action-row streaming-sdrtrunk-toggles');
     [['Enabled', 'enabled', existing?.enabled ?? false, 'all'],
       ['Send heartbeat', 'heartbeatEnabled', existing?.heartbeatEnabled, 'rdio'],
       ['Broadcastify test calls', 'testEnabled', existing?.testEnabled, 'broadcastify-call'],
+      ['Store OTA aliases in playlist', 'storeTalkerAliases', existing?.storeTalkerAliases, 'broadcastify-call'],
       ['Public stream', 'public', existing?.public, 'metadata'],
       ['Inline metadata', 'inline', existing?.inline ?? true, 'icecast'],
       ['Verbose logging', 'verboseLogging', existing?.verboseLogging, 'broadcastify-feed']]
@@ -256,7 +263,8 @@ export function createStreamingWorkspace(deps) {
       definitions.forEach(([, name, inputType]) => {
         body[name] = inputType === 'number' ? Number(controls[name].value) : controls[name].value;
       });
-      ['enabled', 'heartbeatEnabled', 'testEnabled', 'public', 'inline', 'verboseLogging']
+      body.talkerAliasSource = controls.talkerAliasSource.value;
+      ['enabled', 'heartbeatEnabled', 'testEnabled', 'storeTalkerAliases', 'public', 'inline', 'verboseLogging']
         .forEach((name) => { body[name] = controls[name].checked; });
       try {
         await legacyRequest('/api/v1/broadcasters', 'POST', body);

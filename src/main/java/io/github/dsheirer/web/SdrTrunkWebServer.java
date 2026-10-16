@@ -15,6 +15,7 @@ import io.github.dsheirer.audio.broadcast.BroadcastServerType;
 import io.github.dsheirer.audio.broadcast.ConfiguredBroadcast;
 import io.github.dsheirer.audio.broadcast.broadcastify.BroadcastifyCallConfiguration;
 import io.github.dsheirer.audio.broadcast.broadcastify.BroadcastifyFeedConfiguration;
+import io.github.dsheirer.audio.broadcast.broadcastify.TalkerAliasSource;
 import io.github.dsheirer.audio.broadcast.icecast.IcecastConfiguration;
 import io.github.dsheirer.audio.broadcast.openmhz.OpenMHzConfiguration;
 import io.github.dsheirer.audio.broadcast.remote.RemoteApiBroadcaster;
@@ -129,7 +130,7 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
     private static final String LEGACY_TOKEN_KEY = "sdrtrunk.web.access.token";
     private static final String VCE_PREFERENCES_KEY = "sdrtrunk.web.vce.preferences";
     private static final String SESSION_COOKIE = "SDRTRUNK_SESSION";
-    private static final String VCE_WEB_REVISION = "373-0.7.1-beta1";
+    private static final String VCE_WEB_REVISION = "376-0.7.1-beta4";
     private static final long SESSION_LIFETIME_MS = 12L * 60L * 60L * 1000L;
     private static final int LOG_TAIL_BYTES = 1024 * 1024;
     private static final int LOG_ENTRY_LIMIT = 500;
@@ -408,7 +409,7 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
         {
             response.put("username", "admin");
             response.put("primary", true);
-            response.put("guide_dismissal_scope", "sdrtrunk-0.7.1-beta1-admin");
+            response.put("guide_dismissal_scope", "sdrtrunk-0.7.1-beta4-admin");
             response.put("csrf_token", "sdrtrunk-session");
         }
         return response;
@@ -1251,6 +1252,8 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
             value.put("apiKeyConfigured", calls.getApiKey() != null && !calls.getApiKey().isBlank());
             value.put("testEnabled", calls.isTestEnabled());
             value.put("testInterval", calls.getTestInterval());
+            value.put("talkerAliasSource", calls.getTalkerAliasSource().name());
+            value.put("storeTalkerAliases", calls.isStoreTalkerAliases());
         }
         else if(configuration instanceof OpenMHzConfiguration openMHz)
         {
@@ -1330,6 +1333,18 @@ public class SdrTrunkWebServer implements IAudioSegmentListener
             if(apiKey != null && (!apiKey.isBlank() || creating)) { calls.setApiKey(apiKey); }
             calls.setTestEnabled(booleanValue(request, "testEnabled", false));
             calls.setTestInterval(integerValue(request, "testInterval", 15));
+            String source = stringValue(request, "talkerAliasSource", calls.getTalkerAliasSource().name());
+
+            try
+            {
+                calls.setTalkerAliasSource(TalkerAliasSource.valueOf(source));
+            }
+            catch(IllegalArgumentException iae)
+            {
+                throw new IllegalArgumentException("Invalid Broadcastify talker alias source: " + source);
+            }
+
+            calls.setStoreTalkerAliases(booleanValue(request, "storeTalkerAliases", false));
         }
         else if(configuration instanceof OpenMHzConfiguration openMHz)
         {

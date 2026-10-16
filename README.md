@@ -4,7 +4,7 @@ This repository is Rob Gwi's experimental fork of [DSheirer's sdrtrunk](https://
 
 > This is a beta fork and is not an official upstream sdrtrunk release. Back up your playlist before testing it.
 
-## Current development version: 0.7.1-beta1 (not yet published)
+## Current development version: 0.7.1-beta4 (not yet published)
 
 - [Latest downloadable release: Raspberry Pi ARM64 or Linux x86_64 0.7 beta 24](https://github.com/robgwi/sdrtrunk/releases/tag/sdrtrunk-v0.7.0-beta-24)
 - [Raspberry Pi installation guide](RASPBERRY_PI.md)
@@ -124,8 +124,8 @@ This build requires a Raspberry Pi 4 or 5 running a 64-bit operating system. Con
 sudo apt update
 sudo apt install libusb-1.0-0 unzip
 
-unzip sdr-trunk-linux-aarch64-v0.7.1-beta1.zip
-cd sdr-trunk-linux-aarch64-v0.7.1-beta1
+unzip sdr-trunk-linux-aarch64-v0.7.1-beta4.zip
+cd sdr-trunk-linux-aarch64-v0.7.1-beta4
 bin/sdr-trunk
 ```
 
@@ -144,7 +144,40 @@ Environment variables override saved GUI password settings. The older `SDRTRUNK_
 
 ## Release history
 
-### 0.7.1-beta1 (in development)
+### 0.7.1-beta4 (in development)
+
+- Fixed [upstream issue #2496](https://github.com/DSheirer/sdrtrunk/issues/2496): aliases without an explicitly
+  selected color now inherit the active theme's table text color in Now Playing and the Events Log. An explicitly
+  selected black color remains black.
+- Completed [upstream issue #2498](https://github.com/DSheirer/sdrtrunk/issues/2498): each Broadcastify Calls
+  destination can now send either the received over-the-air talker alias or the stored playlist radio alias in the
+  `srcId_alias` field.
+- Added opt-in OTA alias storage for [upstream issue #2497](https://github.com/DSheirer/sdrtrunk/issues/2497).
+  Completed calls sent to that Broadcastify destination create or update an exact radio alias in the channel's active
+  playlist alias list. Radio-ID ranges are never renamed by this feature.
+- Added the Broadcastify talker-alias source and playlist-storage settings to both the Java Playlist Editor and VCE
+  web Streaming editor, with clone/persistence coverage and focused regression tests.
+
+### 0.7.1-beta3
+
+- Fixed [upstream issue #2499](https://github.com/DSheirer/sdrtrunk/issues/2499), where Phase 2 traffic channels
+  created by a Phase 1 control channel silently reverted to the default JMBE audio configuration.
+- Phase 1 and Phase 2 traffic channels now inherit the parent channel's JMBE automatic gain control, tone-generator
+  gain, and comfort-noise gain even when the traffic channel uses the opposite P25 phase.
+- Added regression tests for both Phase 1-to-Phase 2 and Phase 2-to-Phase 1 traffic-channel configuration inheritance.
+
+### 0.7.1-beta2
+
+- Fixed [upstream issue #2475](https://github.com/DSheirer/sdrtrunk/issues/2475), where NXDN trunked call events
+  disappeared when a channel-mode system had no channel-to-frequency map entry. The Events tab now tracks unresolved
+  grants by their logical channel number without attempting to allocate a tuner.
+- Kept unresolved logical channels isolated so simultaneous calls on different unmapped channels are not merged.
+- Retained completed NXDN call trackers through the existing duplicate-suppression window so residual control-channel
+  grants no longer create multiple sub-second event rows or immediately reallocate a traffic channel.
+- Added regression tests for unmapped-channel event tracking, logical-channel isolation, residual-grant suppression,
+  and creation of a new event after the suppression window expires.
+
+### 0.7.1-beta1
 
 - Added explicit Conventional/Trunked NXDN channel modes, conventional call start/progress/release/disconnect handling,
   conventional multi-frequency rotation behavior, clone persistence, RadioReference trunked defaults, and matching web

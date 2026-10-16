@@ -28,7 +28,7 @@ import {
   createAliasListPopupTrigger as buildAliasListPopupTrigger
 } from './features/alias-list-create.js?v=5';
 import { createRadioReferenceImportWorkspace, sortRadioReferenceCountries } from './features/radioreference-import.js?v=26';
-import { createStreamingWorkspace } from './features/streaming-sdrtrunk.js?v=1';
+import { createStreamingWorkspace } from './features/streaming-sdrtrunk.js?v=2';
 import { createSdrTrunkDashboard } from './features/dashboard-sdrtrunk.js?v=3';
 import { createSdrTrunkChannelWorkspace } from './features/channels-sdrtrunk.js?v=1';
 import { createSdrTrunkSpectrum, createSdrTrunkTuners } from './features/tuners-sdrtrunk.js?v=2';

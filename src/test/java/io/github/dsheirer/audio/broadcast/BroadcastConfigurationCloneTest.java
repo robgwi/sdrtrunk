@@ -1,11 +1,19 @@
 package io.github.dsheirer.audio.broadcast;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.xml.JacksonXmlModule;
+import com.fasterxml.jackson.dataformat.xml.XmlMapper;
 import io.github.dsheirer.audio.broadcast.broadcastify.BroadcastifyCallConfiguration;
+import io.github.dsheirer.audio.broadcast.broadcastify.TalkerAliasSource;
 import io.github.dsheirer.audio.broadcast.openmhz.OpenMHzConfiguration;
+import io.github.dsheirer.playlist.PlaylistV2;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BroadcastConfigurationCloneTest
 {
@@ -20,6 +28,8 @@ class BroadcastConfigurationCloneTest
         source.setMaximumRecordingAge(123_000);
         source.setTestEnabled(true);
         source.setTestInterval(30);
+        source.setTalkerAliasSource(TalkerAliasSource.PLAYLIST);
+        source.setStoreTalkerAliases(true);
         source.setEnabled(true);
 
         BroadcastifyCallConfiguration copy = (BroadcastifyCallConfiguration)source.copyOfDisabled();
@@ -30,6 +40,8 @@ class BroadcastConfigurationCloneTest
         assertEquals(source.getApiKey(), copy.getApiKey());
         assertEquals(source.getMaximumRecordingAge(), copy.getMaximumRecordingAge());
         assertEquals(source.getTestInterval(), copy.getTestInterval());
+        assertEquals(TalkerAliasSource.PLAYLIST, copy.getTalkerAliasSource());
+        assertEquals(source.isStoreTalkerAliases(), copy.isStoreTalkerAliases());
         assertFalse(copy.isEnabled());
     }
 
@@ -52,5 +64,31 @@ class BroadcastConfigurationCloneTest
         assertEquals(source.getApiKey(), copy.getApiKey());
         assertEquals(source.getMaximumRecordingAge(), copy.getMaximumRecordingAge());
         assertFalse(copy.isEnabled());
+    }
+
+    @Test
+    void broadcastifyTalkerAliasSettingsPersistInPlaylist() throws Exception
+    {
+        BroadcastifyCallConfiguration configuration = new BroadcastifyCallConfiguration();
+        configuration.setName("County Calls");
+        configuration.setHost("https://example.test/calls");
+        configuration.setSystemID(42);
+        configuration.setApiKey("key");
+        configuration.setTalkerAliasSource(TalkerAliasSource.PLAYLIST);
+        configuration.setStoreTalkerAliases(true);
+        PlaylistV2 playlist = new PlaylistV2();
+        playlist.setBroadcastConfigurations(List.of(configuration));
+        JacksonXmlModule module = new JacksonXmlModule();
+        module.setDefaultUseWrapper(false);
+        ObjectMapper mapper = new XmlMapper(module)
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+
+        String xml = mapper.writeValueAsString(playlist);
+        PlaylistV2 restored = mapper.readValue(xml, PlaylistV2.class);
+        BroadcastifyCallConfiguration restoredConfiguration = (BroadcastifyCallConfiguration)
+            restored.getBroadcastConfigurations().getFirst();
+
+        assertEquals(TalkerAliasSource.PLAYLIST, restoredConfiguration.getTalkerAliasSource());
+        assertTrue(restoredConfiguration.isStoreTalkerAliases());
     }
 }
